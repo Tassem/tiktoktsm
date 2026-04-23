@@ -8,3 +8,242 @@
 export interface HealthStatus {
   status: string;
 }
+
+export interface ApiError {
+  error: string;
+  details?: string;
+}
+
+export interface Niche {
+  id: number;
+  name: string;
+  description: string;
+  audience: string;
+  contentAngle: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateNicheRequest {
+  /** @minLength 1 */
+  name: string;
+  description: string;
+  audience: string;
+  contentAngle: string;
+}
+
+export interface UpdateNicheRequest {
+  /** @minLength 1 */
+  name?: string;
+  description?: string;
+  audience?: string;
+  contentAngle?: string;
+}
+
+export interface ProviderSettings {
+  id: number;
+  providerName: string;
+  model: string;
+  baseUrl: string | null;
+  apiKeyConfigured: boolean;
+  apiKeyLastFour: string | null;
+  realAnalysisEnabled: boolean;
+  updatedAt: string;
+}
+
+export interface UpdateProviderSettingsRequest {
+  /** @minLength 1 */
+  providerName: string;
+  /** @minLength 1 */
+  model: string;
+  baseUrl?: string | null;
+  apiKey?: string | null;
+  clearApiKey?: boolean;
+}
+
+export interface CreateAnalysisRequest {
+  nicheId: number;
+  reelUrl?: string;
+  reelNotes: string;
+  concept: string;
+  demoMode: boolean;
+  /**
+   * JPEG data URLs extracted from the uploaded video for real visual analysis.
+   * @maxItems 32
+   */
+  videoFrames?: string[];
+  /** Original uploaded video as a data URL so the server can extract and transcribe audio for full analysis. */
+  videoDataUrl?: string;
+}
+
+export type ReelAnalysisStatus =
+  (typeof ReelAnalysisStatus)[keyof typeof ReelAnalysisStatus];
+
+export const ReelAnalysisStatus = {
+  completed: "completed",
+  failed: "failed",
+} as const;
+
+export type ReelAnalysisProviderMode =
+  (typeof ReelAnalysisProviderMode)[keyof typeof ReelAnalysisProviderMode];
+
+export const ReelAnalysisProviderMode = {
+  demo: "demo",
+  provider: "provider",
+} as const;
+
+export interface ReelAnalysis {
+  id: number;
+  nicheId: number;
+  nicheName: string;
+  reelUrl: string | null;
+  reelNotes: string;
+  concept: string;
+  status: ReelAnalysisStatus;
+  summaryPrompt: string;
+  providerMode: ReelAnalysisProviderMode;
+  createdAt: string;
+}
+
+export type PromptPackSummarySourceType =
+  (typeof PromptPackSummarySourceType)[keyof typeof PromptPackSummarySourceType];
+
+export const PromptPackSummarySourceType = {
+  original: "original",
+  remix: "remix",
+} as const;
+
+export interface PromptPackSummary {
+  id: number;
+  nicheId: number | null;
+  nicheName: string;
+  analysisId: number;
+  title: string;
+  concept: string;
+  summaryPrompt: string | null;
+  sceneCount: number;
+  createdAt: string;
+  sourceType: PromptPackSummarySourceType;
+}
+
+export type ScenePromptSceneType =
+  (typeof ScenePromptSceneType)[keyof typeof ScenePromptSceneType];
+
+export const ScenePromptSceneType = {
+  hook: "hook",
+  scene: "scene",
+} as const;
+
+export interface ScenePrompt {
+  id: number;
+  promptPackId: number;
+  sceneNumber: number;
+  sceneType: ScenePromptSceneType;
+  title: string;
+  imagePrompt: string;
+  animationPrompt: string;
+  voiceOverDarija: string;
+  soundEffectsPrompt: string;
+}
+
+export type PromptPackDetail = PromptPackSummary & {
+  scenes: ScenePrompt[];
+};
+
+export interface AnalysisResult {
+  analysis: ReelAnalysis;
+  promptPack: PromptPackDetail;
+}
+
+export interface UpdatePromptPackRequest {
+  nicheId: number;
+}
+
+export interface RemixPromptPackRequest {
+  /**
+   * The new story concept or scenario to remix into (e.g. different characters, new plot)
+   * @minLength 10
+   */
+  storyIdea: string;
+  /** Short title for the new remixed pack */
+  concept?: string;
+  /** Optional niche to assign the remixed pack to */
+  nicheId?: number;
+}
+
+export interface DashboardSummary {
+  nicheCount: number;
+  promptPackCount: number;
+  sceneCount: number;
+  analysisCount: number;
+  providerConfigured: boolean;
+  lastPromptPackTitle: string | null;
+}
+
+export type ActivityItemType =
+  (typeof ActivityItemType)[keyof typeof ActivityItemType];
+
+export const ActivityItemType = {
+  niche: "niche",
+  analysis: "analysis",
+  prompt_pack: "prompt_pack",
+} as const;
+
+export interface ActivityItem {
+  id: string;
+  type: ActivityItemType;
+  title: string;
+  detail: string;
+  createdAt: string;
+}
+
+/**
+ * Bad request
+ */
+export type BadRequestResponse = ApiError;
+
+/**
+ * Not found
+ */
+export type NotFoundResponse = ApiError;
+
+export type ListAnalysesParams = {
+  nicheId?: number;
+};
+
+export type ListPromptPacksParams = {
+  nicheId?: number;
+};
+
+export interface FrameSessionFrame {
+  index: number;
+  dataUrl: string;
+  timestampMs: number;
+}
+
+export interface FrameSessionSummary {
+  id: number;
+  videoName: string;
+  videoDurationMs: number;
+  videoWidth: number;
+  videoHeight: number;
+  frameCount: number;
+  mode: string;
+  quality: number;
+  createdAt: string;
+}
+
+export interface FrameSessionDetail extends FrameSessionSummary {
+  frames: FrameSessionFrame[];
+}
+
+export interface CreateFrameSessionRequest {
+  videoName: string;
+  videoDurationMs: number;
+  videoWidth: number;
+  videoHeight: number;
+  frameCount: number;
+  frames: FrameSessionFrame[];
+  mode: string;
+  quality: number;
+}

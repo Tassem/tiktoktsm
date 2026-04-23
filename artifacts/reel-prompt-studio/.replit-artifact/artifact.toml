@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Reel Prompt Studio"
+version = "1.0.0"
+id = "artifacts/reel-prompt-studio"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 23331
+
+[services.development]
+run = "pnpm --filter @workspace/reel-prompt-studio run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/reel-prompt-studio", "run", "build" ]
+publicDir = "artifacts/reel-prompt-studio/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "23331"
+BASE_PATH = "/"

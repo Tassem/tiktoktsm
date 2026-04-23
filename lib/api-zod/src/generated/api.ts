@@ -14,3 +14,325 @@ import * as zod from "zod";
 export const HealthCheckResponse = zod.object({
   status: zod.string(),
 });
+
+/**
+ * @summary List niches
+ */
+export const ListNichesResponseItem = zod.object({
+  id: zod.number(),
+  name: zod.string(),
+  description: zod.string(),
+  audience: zod.string(),
+  contentAngle: zod.string(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+export const ListNichesResponse = zod.array(ListNichesResponseItem);
+
+/**
+ * @summary Create niche
+ */
+
+export const CreateNicheBody = zod.object({
+  name: zod.string().min(1),
+  description: zod.string(),
+  audience: zod.string(),
+  contentAngle: zod.string(),
+});
+
+/**
+ * @summary Get niche
+ */
+export const GetNicheParams = zod.object({
+  nicheId: zod.coerce.number(),
+});
+
+export const GetNicheResponse = zod.object({
+  id: zod.number(),
+  name: zod.string(),
+  description: zod.string(),
+  audience: zod.string(),
+  contentAngle: zod.string(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Update niche
+ */
+export const UpdateNicheParams = zod.object({
+  nicheId: zod.coerce.number(),
+});
+
+export const UpdateNicheBody = zod.object({
+  name: zod.string().min(1).optional(),
+  description: zod.string().optional(),
+  audience: zod.string().optional(),
+  contentAngle: zod.string().optional(),
+});
+
+export const UpdateNicheResponse = zod.object({
+  id: zod.number(),
+  name: zod.string(),
+  description: zod.string(),
+  audience: zod.string(),
+  contentAngle: zod.string(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Delete niche
+ */
+export const DeleteNicheParams = zod.object({
+  nicheId: zod.coerce.number(),
+});
+
+/**
+ * @summary Get AI provider settings
+ */
+export const GetProviderSettingsResponse = zod.object({
+  id: zod.number(),
+  providerName: zod.string(),
+  model: zod.string(),
+  baseUrl: zod.string().nullable(),
+  apiKeyConfigured: zod.boolean(),
+  apiKeyLastFour: zod.string().nullable(),
+  realAnalysisEnabled: zod.boolean(),
+  updatedAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Update AI provider settings
+ */
+
+export const UpdateProviderSettingsBody = zod.object({
+  providerName: zod.string().min(1),
+  model: zod.string().min(1),
+  baseUrl: zod.string().nullish(),
+  apiKey: zod.string().nullish(),
+  clearApiKey: zod.boolean().optional(),
+});
+
+export const UpdateProviderSettingsResponse = zod.object({
+  id: zod.number(),
+  providerName: zod.string(),
+  model: zod.string(),
+  baseUrl: zod.string().nullable(),
+  apiKeyConfigured: zod.boolean(),
+  apiKeyLastFour: zod.string().nullable(),
+  realAnalysisEnabled: zod.boolean(),
+  updatedAt: zod.coerce.date(),
+});
+
+/**
+ * @summary List reel analyses
+ */
+export const ListAnalysesQueryParams = zod.object({
+  nicheId: zod.coerce.number().optional(),
+});
+
+export const ListAnalysesResponseItem = zod.object({
+  id: zod.number(),
+  nicheId: zod.number(),
+  nicheName: zod.string(),
+  reelUrl: zod.string().nullable(),
+  reelNotes: zod.string(),
+  concept: zod.string(),
+  status: zod.enum(["completed", "failed"]),
+  summaryPrompt: zod.string(),
+  providerMode: zod.enum(["demo", "provider"]),
+  createdAt: zod.coerce.date(),
+});
+export const ListAnalysesResponse = zod.array(ListAnalysesResponseItem);
+
+/**
+ * @summary Analyze reel and create prompt pack
+ */
+export const createAnalysisBodyVideoFramesMax = 32;
+
+export const CreateAnalysisBody = zod.object({
+  nicheId: zod.number(),
+  reelUrl: zod.string().optional(),
+  reelNotes: zod.string(),
+  concept: zod.string(),
+  demoMode: zod.boolean(),
+  videoFrames: zod
+    .array(zod.string())
+    .max(createAnalysisBodyVideoFramesMax)
+    .optional()
+    .describe(
+      "JPEG data URLs extracted from the uploaded video for real visual analysis.",
+    ),
+  videoDataUrl: zod
+    .string()
+    .optional()
+    .describe(
+      "Original uploaded video as a data URL so the server can extract and transcribe audio for full analysis.",
+    ),
+});
+
+/**
+ * @summary List prompt packs
+ */
+export const ListPromptPacksQueryParams = zod.object({
+  nicheId: zod.coerce.number().optional(),
+  sourceType: zod.enum(["original", "remix"]).optional(),
+  limit: zod.coerce.number().min(1).max(100).optional().default(50),
+  offset: zod.coerce.number().min(0).optional().default(0),
+});
+
+export const ListPromptPacksResponseItem = zod.object({
+  id: zod.number(),
+  nicheId: zod.number().nullable(),
+  nicheName: zod.string(),
+  analysisId: zod.number(),
+  title: zod.string(),
+  concept: zod.string(),
+  summaryPrompt: zod.string().nullable(),
+  sceneCount: zod.number(),
+  createdAt: zod.coerce.date(),
+  sourceType: zod.enum(["original", "remix"]),
+});
+export const ListPromptPacksResponse = zod.array(ListPromptPacksResponseItem);
+
+/**
+ * @summary Get prompt pack with scenes
+ */
+export const GetPromptPackParams = zod.object({
+  promptPackId: zod.coerce.number(),
+});
+
+export const GetPromptPackResponse = zod
+  .object({
+    id: zod.number(),
+    nicheId: zod.number().nullable(),
+    nicheName: zod.string(),
+    analysisId: zod.number(),
+    title: zod.string(),
+    concept: zod.string(),
+    summaryPrompt: zod.string().nullable(),
+    sceneCount: zod.number(),
+    createdAt: zod.coerce.date(),
+    sourceType: zod.enum(["original", "remix"]),
+  })
+  .and(
+    zod.object({
+      scenes: zod.array(
+        zod.object({
+          id: zod.number(),
+          promptPackId: zod.number(),
+          sceneNumber: zod.number(),
+          sceneType: zod.enum(["hook", "scene"]),
+          title: zod.string(),
+          imagePrompt: zod.string(),
+          animationPrompt: zod.string(),
+          voiceOverDarija: zod.string(),
+          soundEffectsPrompt: zod.string(),
+          sceneFrameUrl: zod.string().nullable().optional(),
+        }),
+      ),
+    }),
+  );
+
+/**
+ * @summary Update prompt pack
+ */
+export const UpdatePromptPackParams = zod.object({
+  promptPackId: zod.coerce.number(),
+});
+
+export const UpdatePromptPackBody = zod.object({
+  nicheId: zod.number(),
+});
+
+export const UpdatePromptPackResponse = zod
+  .object({
+    id: zod.number(),
+    nicheId: zod.number().nullable(),
+    nicheName: zod.string(),
+    analysisId: zod.number(),
+    title: zod.string(),
+    concept: zod.string(),
+    summaryPrompt: zod.string().nullable(),
+    sceneCount: zod.number(),
+    createdAt: zod.coerce.date(),
+    sourceType: zod.enum(["original", "remix"]),
+  })
+  .and(
+    zod.object({
+      scenes: zod.array(
+        zod.object({
+          id: zod.number(),
+          promptPackId: zod.number(),
+          sceneNumber: zod.number(),
+          sceneType: zod.enum(["hook", "scene"]),
+          title: zod.string(),
+          imagePrompt: zod.string(),
+          animationPrompt: zod.string(),
+          voiceOverDarija: zod.string(),
+          soundEffectsPrompt: zod.string(),
+          sceneFrameUrl: zod.string().nullable().optional(),
+        }),
+      ),
+    }),
+  );
+
+/**
+ * @summary Delete prompt pack
+ */
+export const DeletePromptPackParams = zod.object({
+  promptPackId: zod.coerce.number(),
+});
+
+/**
+ * @summary Remix a prompt pack with a new story concept
+ */
+export const RemixPromptPackParams = zod.object({
+  promptPackId: zod.coerce.number(),
+});
+
+export const remixPromptPackBodyStoryIdeaMin = 10;
+
+export const RemixPromptPackBody = zod.object({
+  storyIdea: zod
+    .string()
+    .min(remixPromptPackBodyStoryIdeaMin)
+    .describe(
+      "The new story concept or scenario to remix into (e.g. different characters, new plot)",
+    ),
+  concept: zod
+    .string()
+    .optional()
+    .describe("Short title for the new remixed pack"),
+  nicheId: zod
+    .number()
+    .optional()
+    .describe("Optional niche to assign the remixed pack to"),
+});
+
+/**
+ * @summary Get dashboard summary
+ */
+export const GetDashboardSummaryResponse = zod.object({
+  nicheCount: zod.number(),
+  promptPackCount: zod.number(),
+  sceneCount: zod.number(),
+  analysisCount: zod.number(),
+  providerConfigured: zod.boolean(),
+  lastPromptPackTitle: zod.string().nullable(),
+});
+
+/**
+ * @summary List recent activity
+ */
+export const ListRecentActivityResponseItem = zod.object({
+  id: zod.string(),
+  type: zod.enum(["niche", "analysis", "prompt_pack"]),
+  title: zod.string(),
+  detail: zod.string(),
+  createdAt: zod.coerce.date(),
+});
+export const ListRecentActivityResponse = zod.array(
+  ListRecentActivityResponseItem,
+);
