@@ -43,23 +43,26 @@ type GetPromptPackResponse = {
   scenes: GetPromptPackScene[];
 };
 
-const IMAGE_MODELS = [
-  { value: "flux-demo", label: "🍌 FLUX Nano (تجريبي — مجاني)" },
-  { value: "flux-schnell", label: "FLUX Schnell (سريع — BFL)" },
-  { value: "flux-dev", label: "FLUX Dev (جودة عالية)" },
-  { value: "flux-pro", label: "FLUX Pro / BFL" },
-  { value: "dalle3", label: "DALL-E 3" },
-  { value: "custom", label: "Custom" },
-];
+type ServiceAssignment = {
+  key: string;
+  label: string;
+  assignedModel: { id: number; label: string; modelId: string } | null;
+};
 
-const VIDEO_MODELS = [
-  { value: "veo-3-demo", label: "🎬 Veo 3 (تجريبي — مجاني)" },
-  { value: "veo-3", label: "Veo 3 — Google DeepMind" },
-  { value: "kling-1.6", label: "Kling 1.6 (fal.ai)" },
-  { value: "runway-gen4", label: "Runway Gen-4" },
-  { value: "pika-2", label: "Pika 2.0" },
-  { value: "custom", label: "Custom" },
-];
+function useServiceModels() {
+  return useQuery<{ services: ServiceAssignment[] }>({
+    queryKey: ["ai-service-assignments"],
+    queryFn: async () => {
+      const res = await fetch("/api/ai-service-assignments");
+      if (!res.ok) return { services: [] };
+      return res.json();
+    },
+    staleTime: 30_000,
+    retry: false,
+  });
+}
+
+const POLLINATIONS_OPTION = { value: "pollinations", label: "🍌 مجاني (Pollinations AI)" };
 
 function useGenerationSettings() {
   const [settings, setSettings] = useState<{
@@ -67,19 +70,19 @@ function useGenerationSettings() {
     videoModel: string;
   }>(() => {
     try {
-      return JSON.parse(localStorage.getItem("reel-gen-settings") || "null") || {
-        imageModel: "flux-demo",
-        videoModel: "veo-3-demo",
+      return JSON.parse(localStorage.getItem("reel-gen-settings-v2") || "null") || {
+        imageModel: "pollinations",
+        videoModel: "configured",
       };
     } catch {
-      return { imageModel: "flux-demo", videoModel: "veo-3-demo" };
+      return { imageModel: "pollinations", videoModel: "configured" };
     }
   });
 
   const update = useCallback((updates: Partial<typeof settings>) => {
     setSettings((prev) => {
       const next = { ...prev, ...updates };
-      localStorage.setItem("reel-gen-settings", JSON.stringify(next));
+      localStorage.setItem("reel-gen-settings-v2", JSON.stringify(next));
       return next;
     });
   }, []);
@@ -296,6 +299,22 @@ function SceneCard({
   const { toast } = useToast();
   const [promptsOpen, setPromptsOpen] = useState(false);
   const [genSettings, updateGenSettings] = useGenerationSettings();
+  const { data: serviceData } = useServiceModels();
+
+  // Build dynamic model options from service assignments
+  const imageServiceModel = serviceData?.services?.find((s) => s.key === "image-generation")?.assignedModel;
+  const videoServiceModel = serviceData?.services?.find((s) => s.key === "video-generation")?.assignedModel;
+
+  const IMAGE_MODELS = [
+    POLLINATIONS_OPTION,
+    ...(imageServiceModel ? [{ value: "configured", label: `⚡ ${imageServiceModel.label}` }] : []),
+  ];
+
+  const VIDEO_MODELS = [
+    ...(videoServiceModel ? [{ value: "configured", label: `⚡ ${videoServiceModel.label}` }] : [
+      { value: "no-model", label: "لا يوجد موديل — أضف من الإعدادات" },
+    ]),
+  ];
 
   const [imageCount, setImageCount] = useState<1 | 2 | 4>(1);
   const [imageModel, setImageModel] = useState(genSettings.imageModel);
@@ -326,9 +345,9 @@ function SceneCard({
   async function handleGenerateImages() {
     setIsGeneratingImages(true);
     try {
-      // Demo mode: pollinations.ai — free, no API key needed
-      if (imageModel === "flux-demo") {
-        await new Promise((r) => setTimeout(r, 1200));
+      // Free Pollinations option — no API key needed
+      if (imageModel === "pollinations") {
+        await new Promise((r) => setTimeout(r, 800));
         const baseSeed = Math.floor(Math.random() * 900000) + 10000;
         const safePrompt = encodeURIComponent(imagePromptFull.slice(0, 300));
         const imgs = Array.from({ length: imageCount }, (_, i) =>
@@ -339,17 +358,11 @@ function SceneCard({
         return;
       }
 
-      const stored = (() => { try { return JSON.parse(localStorage.getItem("reel-gen-settings") || "{}"); } catch { return {}; } })();
+      // Configured model from settings
       const res = await fetch("/api/generate-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: imagePromptFull,
-          model: imageModel,
-          count: imageCount,
-          apiKey: stored.imageApiKey ?? "",
-          provider: stored.imageProvider ?? "fal",
-        }),
+        body: JSON.stringify({ prompt: imagePromptFull, count: imageCount }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({})) as { error?: string };
@@ -360,8 +373,8 @@ function SceneCard({
       if ((data.images ?? []).length > 0) setSelectedImageIdx(0);
     } catch (err) {
       toast({
-        title: "توليد الصور غير متاح",
-        description: err instanceof Error ? err.message : "اضف مفتاح API في الإعدادات",
+        title: "فشل توليد الصور",
+        description: err instanceof Error ? err.message : "تحقق من إعدادات المزود",
         variant: "destructive",
       });
     } finally {
@@ -370,30 +383,23 @@ function SceneCard({
   }
 
   async function handleGenerateVideo() {
+    if (videoModel === "no-model") {
+      toast({
+        title: "لا يوجد موديل للفيديو",
+        description: "اذهب للإعدادات → ربط الخدمات → خصص موديل لخدمة توليد الفيديو",
+        variant: "destructive",
+      });
+      return;
+    }
     const selectedImageUrl = selectedImageIdx !== null ? generatedImages[selectedImageIdx] : scene.sceneFrameUrl;
     setIsGeneratingVideo(true);
     try {
-      // Demo mode: show full prompt + placeholder
-      if (videoModel === "veo-3-demo") {
-        await new Promise((r) => setTimeout(r, 1800));
-        toast({
-          title: "Veo 3 تجريبي — الـ Prompt جاهز",
-          description: "لتفعيل التوليد الحقيقي، أضف مفتاح Google AI أو fal.ai في الإعدادات",
-        });
-        setIsGeneratingVideo(false);
-        return;
-      }
-
-      const stored = (() => { try { return JSON.parse(localStorage.getItem("reel-gen-settings") || "{}"); } catch { return {}; } })();
       const res = await fetch("/api/generate-video", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: videoPromptFull,
-          model: videoModel,
-          imageUrl: selectedImageUrl,
-          apiKey: stored.videoApiKey ?? "",
-          provider: stored.videoProvider ?? "fal",
+          imageUrl: selectedImageUrl ?? undefined,
         }),
       });
       if (!res.ok) {
@@ -404,8 +410,8 @@ function SceneCard({
       setGeneratedVideoUrl(data.videoUrl);
     } catch (err) {
       toast({
-        title: "توليد الفيديو غير متاح",
-        description: err instanceof Error ? err.message : "اضف مفتاح API في الإعدادات",
+        title: "فشل توليد الفيديو",
+        description: err instanceof Error ? err.message : "تحقق من إعدادات المزود",
         variant: "destructive",
       });
     } finally {
@@ -739,24 +745,16 @@ function SceneCard({
 
               <Button
                 size="sm"
-                className={`w-full h-8 text-xs text-white ${
-                  videoModel === "veo-3-demo"
-                    ? "bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-600 hover:to-pink-700"
-                    : "bg-rose-600 hover:bg-rose-700"
-                }`}
+                className="w-full h-8 text-xs text-white bg-rose-600 hover:bg-rose-700"
                 onClick={handleGenerateVideo}
-                disabled={isGeneratingVideo}
+                disabled={isGeneratingVideo || videoModel === "no-model"}
               >
                 {isGeneratingVideo ? (
                   <Loader2 className="mr-1.5 size-3.5 animate-spin" />
                 ) : (
                   <Play className="mr-1.5 size-3.5" />
                 )}
-                {isGeneratingVideo
-                  ? "جاري التوليد..."
-                  : videoModel === "veo-3-demo"
-                  ? "🎬 تجربة Veo 3"
-                  : "توليد الفيديو"}
+                {isGeneratingVideo ? "جاري التوليد..." : "توليد الفيديو"}
               </Button>
             </div>
 
@@ -769,7 +767,7 @@ function SceneCard({
               <div className="flex-1 rounded-lg border border-dashed border-border/40 bg-muted/10 flex flex-col items-center justify-center py-4 gap-1.5 min-h-[80px]">
                 <Film className="size-4 text-muted-foreground/25" />
                 <p className="text-[9px] text-muted-foreground/40 text-center px-2">
-                  {videoModel === "veo-3-demo" ? "اضغط لتجربة Veo 3 وعرض الـ Prompt" : "اختر صورة وولّد الفيديو"}
+                  {videoModel === "no-model" ? "فعّل موديل الفيديو من الإعدادات" : "اختر صورة وولّد الفيديو"}
                 </p>
               </div>
             )}

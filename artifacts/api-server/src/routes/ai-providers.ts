@@ -188,7 +188,8 @@ const SERVICES = [
   { key: "video-analysis", label: "تحليل الفيديو (Reel Analysis)", description: "يحتاج موديل يدعم الصور/الفيديو (Vision)" },
   { key: "remix", label: "ريميكس القصص (Remix Studio)", description: "موديل نصي قوي لإعادة كتابة القصص" },
   { key: "story-summary", label: "ملخص القصة بالعربية", description: "موديل نصي لتوليد الملخصات بالدارجة" },
-  { key: "image-generation", label: "توليد الصور", description: "موديل متخصص في توليد الصور (إن دعمه المزود)" },
+  { key: "image-generation", label: "توليد الصور", description: "موديل متخصص في توليد الصور (DALL-E, FLUX, Ideogram...)" },
+  { key: "video-generation", label: "توليد الفيديو", description: "موديل لتوليد الفيديو (Veo, Kling, Runway, Pika عبر fal.ai أو Google)" },
 ];
 
 // GET /api/ai-service-assignments - get all service assignments with model info
