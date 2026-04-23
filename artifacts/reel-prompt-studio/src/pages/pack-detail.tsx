@@ -820,10 +820,10 @@ function PromptRow({
   );
 }
 
-function buildCopyReadyImagePrompt(summaryPrompt: string | null | undefined, imagePrompt: string) {
-  const styleContext = summaryPrompt?.trim();
-  if (!styleContext) return imagePrompt;
-  return `Use this global visual direction from the analyzed video:\n${styleContext}\n\nGenerate this exact scene as a vertical 9:16 image:\n${imagePrompt}`;
+function buildCopyReadyImagePrompt(_summaryPrompt: string | null | undefined, imagePrompt: string) {
+  // imagePrompt is already 100% self-contained (per system prompt Rule 3).
+  // Wrapping it with summaryPrompt would duplicate the style context inside the prompt.
+  return imagePrompt;
 }
 
 function buildSceneVideoPrompt({

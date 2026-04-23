@@ -59,13 +59,31 @@ CRITICAL RULES:
    - SPEAKER BLOCKING every line: name speaker, ⚠️ all others mouths fully closed.
    - The PRIMARY ACTION (from Rule 2) must be the FOCAL POINT of the animation.
 
-5. DIALOGUE ACCURACY: Preserve all speaker turns. voiceOverDarija in Moroccan Darija (Arabic script preferred).
+5. DIALOGUE FORMAT (MANDATORY):
+   - voiceOverDarija MUST be written in Moroccan Darija in ARABIC SCRIPT — NOT Latin transliteration.
+   - Format: one line per speaker turn. Each line: SpeakerRole: "الحوار"
+   - Example: الأم الفريزة: "واش كلشي مزيان؟"\\nالبنت: "لا، عندي مشكلة"\\nالأم الفريزة: "حكيلي!"
+   - Use exact role labels matching the character anchors.
+   - Preserve every distinct speaker turn from the audio. NEVER write generic placeholder dialogue.
 
 6. SCENE COUNT: Let content decide. Scene 1 = visual hook.
 
 7. SOUND: ambience + music genre+tempo + specific sfx + volume mix.
 
-Return strict JSON only.`,
+OUTPUT FORMAT — strict JSON only (no markdown, no code fences, no extra text before or after):
+{
+  "title": "short precise title describing the actual visible video content",
+  "summaryPrompt": "### Style\\n* **Visual Texture:** [exact art style + surface quality]\\n* **Lighting Quality:** [direction + color temp]\\n* **Color Palette:** [4 dominant hues by precise name]\\n* **Atmosphere:** [emotional feel]\\n\\n### Cinematography\\n* **Camera:** [movement type + speed]\\n* **Lens:** [focal length feel + depth of field]\\n* **Lighting Setup:** [key/fill/rim]\\n* **Mood:** [visual emotion]",
+  "scenes": [
+    {
+      "title": "precise beat description",
+      "imagePrompt": "SELF-CONTAINED English image prompt (MIN 150 WORDS): 9:16 vertical, art style, FULL character anchor per character (hair+face+skin+clothing+build+position+state), exact environment, camera framing+angle, lighting, color palette 3-4 hues, mood, props. ZERO vague sentences.",
+      "animationPrompt": "COMPLETE English animation prompt (MIN 120 WORDS): movement path, facial expressions, camera motion, shot duration, transition. SPEAKER BLOCKING per line.",
+      "voiceOverDarija": "Moroccan Darija in ARABIC SCRIPT — one line per turn: SpeakerRole: \\"الحوار\\"\\nSpeakerRole2: \\"الرد\\"",
+      "soundEffectsPrompt": "English sound design: ambience, music genre+tempo, sfx moments, volume mix"
+    }
+  ]
+}`,
   },
 
   "dev-agent": {
@@ -215,6 +233,8 @@ const OUTDATED_MARKERS: Record<string, string[]> = {
     "BUILD: height relative to others, body type.\n   - DIALOGUE SPEAKER LOCK",
     "painted-on or 3D raised\n   - SKIN TONE",
     "2. IMAGE PROMPT COMPLETENESS",
+    // Current version marker — missing JSON output format + dialogue rule is too brief
+    "5. DIALOGUE ACCURACY: Preserve all speaker turns. voiceOverDarija in Moroccan Darija (Arabic script preferred).",
   ],
   "story-remix": [
     "Each imagePrompt: MIN 150 words",

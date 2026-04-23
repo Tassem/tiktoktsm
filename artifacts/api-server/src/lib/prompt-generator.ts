@@ -357,10 +357,12 @@ export async function buildAIVideoPromptPack(input: {
       },
       body: JSON.stringify({
         model: input.modelOverride?.trim() || defaultModel,
-        // Do NOT force response_format: json_object here — the custom system prompt (v2)
-        // uses a two-stage output: Stage 1 markdown analysis + "---JSON-OUTPUT-BELOW---" + Stage 2 JSON.
-        // Forcing json_object would prevent Stage 1 from being written, causing the AI to
-        // cram Stage 1 analysis text into JSON fields (summaryPrompt / imagePrompt duplication bug).
+        // Use response_format: json_object only when the system prompt is single-stage ("Return strict JSON only").
+        // If the custom system prompt uses a two-stage approach with "---JSON-OUTPUT-BELOW---", skip it
+        // to allow Stage 1 markdown + separator + Stage 2 JSON (our parser handles both cases).
+        ...((input.systemPromptOverride ?? "").match(/JSON.OUTPUT.BELOW/i)
+          ? {}
+          : { response_format: { type: "json_object" } }),
         messages: [
           {
             role: "system",
