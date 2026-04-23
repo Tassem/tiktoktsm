@@ -7,13 +7,80 @@ function delay(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+async function generateOneImage(prompt: string, cfg: { baseUrl: string; apiKey: string; modelId: string }): Promise<string> {
+  const { baseUrl, apiKey, modelId } = cfg;
+  const cleanBase = baseUrl.replace(/\/$/, "");
+
+  // ── fal.ai (detected by URL or model format like "fal-ai/...") ──────────────
+  const isFal = cleanBase.includes("fal.run") || cleanBase.includes("fal.ai") || modelId.startsWith("fal-ai/");
+  if (isFal) {
+    const falBase = isFal && !cleanBase.includes("fal.run") ? "https://fal.run" : cleanBase;
+    const falRes = await fetch(`${falBase}/${modelId}`, {
+      method: "POST",
+      headers: { Authorization: `Key ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt,
+        num_images: 1,
+        image_size: "portrait_9_16",
+        num_inference_steps: modelId.includes("schnell") ? 4 : 28,
+        enable_safety_checker: false,
+      }),
+    });
+    if (!falRes.ok) {
+      const err = await falRes.json().catch(() => ({})) as { detail?: string; message?: string };
+      throw new Error(err.detail ?? err.message ?? `fal.ai ${falRes.status}`);
+    }
+    const falData = await falRes.json() as { images?: Array<{ url: string }> };
+    const url = falData.images?.[0]?.url;
+    if (!url) throw new Error("fal.ai لم يرجع رابط الصورة");
+    return url;
+  }
+
+  // ── OpenAI-compatible /images/generations (DALL-E 3, Stable Diffusion...) ──
+  // Try standard images/generations endpoint first
+  const genRes = await fetch(`${cleanBase}/images/generations`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "https://replit.com",
+      "X-Title": "Reel Prompt Studio",
+    },
+    body: JSON.stringify({
+      model: modelId,
+      prompt: prompt.slice(0, 4000),
+      n: 1,
+      size: "1024x1024",
+      response_format: "url",
+    }),
+  });
+
+  if (genRes.ok) {
+    const genData = await genRes.json() as { data?: Array<{ url?: string; b64_json?: string }> };
+    const url = genData.data?.[0]?.url;
+    if (url) return url;
+    throw new Error("الـ API لم يرجع رابط صورة");
+  }
+
+  // If /images/generations returned 404 → this model doesn't support image generation via this endpoint
+  if (genRes.status === 404) {
+    throw new Error(
+      `الموديل "${modelId}" لا يدعم توليد الصور عبر هذا المزود.\n` +
+      `للحصول على أفضل نتائج:\n` +
+      `• OpenRouter: استخدم موديل "openai/dall-e-3"\n` +
+      `• fal.ai (custom): استخدم "fal-ai/flux/schnell" أو "fal-ai/flux-pro/v1.1"`
+    );
+  }
+
+  const errBody = await genRes.json().catch(() => ({})) as { error?: { message?: string }; message?: string };
+  const errMsg = errBody.error?.message ?? (errBody as { message?: string }).message ?? `خطأ ${genRes.status}`;
+  throw new Error(errMsg);
+}
+
 // ─── Image Generation ────────────────────────────────────────────────────────
 
 router.post("/generate-image", async (req, res): Promise<void> => {
-  const body = req.body as {
-    prompt?: string;
-    count?: number;
-  };
+  const body = req.body as { prompt?: string; count?: number };
 
   if (!body.prompt || typeof body.prompt !== "string") {
     res.status(400).json({ error: "prompt مطلوب" });
@@ -22,7 +89,6 @@ router.post("/generate-image", async (req, res): Promise<void> => {
 
   const count = Math.min(body.count ?? 1, 4);
 
-  // Resolve model from service assignment
   const cfg = await getServiceModel("image-generation");
   if (!cfg) {
     res.status(503).json({
@@ -31,69 +97,13 @@ router.post("/generate-image", async (req, res): Promise<void> => {
     return;
   }
 
-  const { baseUrl, apiKey, modelId } = cfg;
-  const cleanBase = baseUrl.replace(/\/$/, "");
-
   try {
-    // ── fal.ai ──────────────────────────────────────────────────────────────
-    if (cleanBase.includes("fal.run") || cleanBase.includes("fal.ai")) {
-      const images: string[] = [];
-      for (let i = 0; i < count; i++) {
-        const falRes = await fetch(`${cleanBase}/${modelId}`, {
-          method: "POST",
-          headers: {
-            Authorization: `Key ${apiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            prompt: body.prompt,
-            num_images: 1,
-            image_size: "portrait_9_16",
-            num_inference_steps: modelId.includes("schnell") ? 4 : 28,
-            enable_safety_checker: false,
-          }),
-        });
-
-        if (!falRes.ok) {
-          const err = await falRes.json().catch(() => ({})) as { detail?: string; message?: string };
-          throw new Error(err.detail ?? err.message ?? `fal.ai ${falRes.status}`);
-        }
-
-        const falData = await falRes.json() as { images?: Array<{ url: string }> };
-        const url = falData.images?.[0]?.url;
-        if (url) images.push(url);
-      }
-      res.json({ images });
-      return;
+    const images: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const url = await generateOneImage(body.prompt, cfg);
+      images.push(url);
     }
-
-    // ── OpenAI-compatible /images/generations (OpenRouter, custom) ───────────
-    const genRes = await fetch(`${cleanBase}/images/generations`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://replit.com",
-        "X-Title": "Reel Prompt Studio",
-      },
-      body: JSON.stringify({
-        model: modelId,
-        prompt: body.prompt,
-        n: count,
-        size: "1024x1792",
-        response_format: "url",
-      }),
-    });
-
-    if (!genRes.ok) {
-      const err = await genRes.json().catch(() => ({})) as { error?: { message?: string }; message?: string };
-      throw new Error(err.error?.message ?? (err as { message?: string }).message ?? `خطأ ${genRes.status}`);
-    }
-
-    const genData = await genRes.json() as { data?: Array<{ url?: string; b64_json?: string }> };
-    const images = (genData.data ?? []).map((d) => d.url ?? "").filter(Boolean);
     res.json({ images });
-
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : "فشل توليد الصور" });
   }
@@ -102,10 +112,7 @@ router.post("/generate-image", async (req, res): Promise<void> => {
 // ─── Video Generation ────────────────────────────────────────────────────────
 
 router.post("/generate-video", async (req, res): Promise<void> => {
-  const body = req.body as {
-    prompt?: string;
-    imageUrl?: string;
-  };
+  const body = req.body as { prompt?: string; imageUrl?: string };
 
   if (!body.prompt || typeof body.prompt !== "string") {
     res.status(400).json({ error: "prompt مطلوب" });
@@ -124,8 +131,9 @@ router.post("/generate-video", async (req, res): Promise<void> => {
   const cleanBase = baseUrl.replace(/\/$/, "");
 
   try {
-    // ── fal.ai ──────────────────────────────────────────────────────────────
-    if (cleanBase.includes("fal.run") || cleanBase.includes("fal.ai")) {
+    // ── fal.ai (detected by URL or model path like "fal-ai/...") ─────────────
+    const isFal = cleanBase.includes("fal.run") || cleanBase.includes("fal.ai") || modelId.startsWith("fal-ai/");
+    if (isFal) {
       const requestBody: Record<string, unknown> = {
         prompt: body.prompt,
         aspect_ratio: "9:16",
@@ -135,10 +143,7 @@ router.post("/generate-video", async (req, res): Promise<void> => {
 
       const falRes = await fetch(`https://fal.run/${modelId}`, {
         method: "POST",
-        headers: {
-          Authorization: `Key ${apiKey}`,
-          "Content-Type": "application/json",
-        },
+        headers: { Authorization: `Key ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify(requestBody),
       });
 
@@ -222,7 +227,7 @@ router.post("/generate-video", async (req, res): Promise<void> => {
       throw new Error("انتهت مهلة Google Veo — حاول مجدداً");
     }
 
-    // ── OpenAI-compatible video (generic custom provider) ────────────────────
+    // ── Generic OpenAI-compatible video endpoint ─────────────────────────────
     const vidRes = await fetch(`${cleanBase}/video/generations`, {
       method: "POST",
       headers: {
@@ -241,8 +246,8 @@ router.post("/generate-video", async (req, res): Promise<void> => {
     });
 
     if (!vidRes.ok) {
-      const err = await vidRes.json().catch(() => ({})) as { error?: { message?: string }; message?: string };
-      throw new Error(err.error?.message ?? (err as { message?: string }).message ?? `خطأ ${vidRes.status}`);
+      const errBody = await vidRes.json().catch(() => ({})) as { error?: { message?: string }; message?: string };
+      throw new Error(errBody.error?.message ?? (errBody as { message?: string }).message ?? `خطأ ${vidRes.status}`);
     }
 
     const vidData = await vidRes.json() as { url?: string; videoUrl?: string; data?: Array<{ url?: string }> };

@@ -372,10 +372,12 @@ function SceneCard({
       setGeneratedImages(data.images ?? []);
       if ((data.images ?? []).length > 0) setSelectedImageIdx(0);
     } catch (err) {
+      const msg = err instanceof Error ? err.message : "تحقق من إعدادات المزود";
       toast({
         title: "فشل توليد الصور",
-        description: err instanceof Error ? err.message : "تحقق من إعدادات المزود",
+        description: msg.split("\n")[0],
         variant: "destructive",
+        duration: 8000,
       });
     } finally {
       setIsGeneratingImages(false);

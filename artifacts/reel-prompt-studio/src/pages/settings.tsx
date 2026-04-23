@@ -576,6 +576,22 @@ function ServiceAssignmentsCard({
                     ))}
                   </SelectContent>
                 </Select>
+
+                {/* Per-service guidance hints */}
+                {svc.key === "image-generation" && (
+                  <div className="rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 px-3 py-2 text-xs text-blue-800 dark:text-blue-300 space-y-0.5">
+                    <p className="font-semibold">🖼️ موديلات مدعومة لتوليد الصور:</p>
+                    <p>• <span className="font-mono">openai/dall-e-3</span> — عبر OpenRouter</p>
+                    <p>• <span className="font-mono">fal-ai/flux/schnell</span> أو <span className="font-mono">fal-ai/flux-pro/v1.1</span> — أضف مزود Custom بـ URL: <span className="font-mono">https://fal.run</span></p>
+                  </div>
+                )}
+                {svc.key === "video-generation" && (
+                  <div className="rounded-md bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800 px-3 py-2 text-xs text-rose-800 dark:text-rose-300 space-y-0.5">
+                    <p className="font-semibold">🎬 موديلات مدعومة لتوليد الفيديو:</p>
+                    <p>• <span className="font-mono">fal-ai/veo3</span> أو <span className="font-mono">fal-ai/kling-video/v1.6/standard/image-to-video</span></p>
+                    <p>• أضف مزود Custom بـ URL: <span className="font-mono">https://fal.run</span> ومفتاح fal.ai</p>
+                  </div>
+                )}
               </div>
             ))}
 
