@@ -236,6 +236,147 @@ function AddModelForm({
   );
 }
 
+// ─── Model Row (with inline edit) ────────────────────────────────────────────
+
+function ModelRow({
+  model,
+  onDelete,
+  onRefresh,
+  providerId: _providerId,
+  isDeleting,
+}: {
+  model: ProviderModel;
+  onDelete: () => void;
+  onRefresh: () => void;
+  providerId: number;
+  isDeleting: boolean;
+}) {
+  const { toast } = useToast();
+  const [editing, setEditing] = useState(false);
+  const [editLabel, setEditLabel] = useState(model.label);
+  const [editModelId, setEditModelId] = useState(model.modelId);
+  const [editCaps, setEditCaps] = useState<string[]>(
+    model.capabilities ? model.capabilities.split(",").filter(Boolean) : []
+  );
+
+  const updateModel = useMutation({
+    mutationFn: (data: Record<string, unknown>) =>
+      apiFetch(`/api/ai-providers/models/${model.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => {
+      toast({ title: "✅ تم تحديث الموديل" });
+      setEditing(false);
+      onRefresh();
+    },
+    onError: (err) => toast({ title: "خطأ", description: err.message, variant: "destructive" }),
+  });
+
+  function toggleCap(cap: string) {
+    setEditCaps((prev) => prev.includes(cap) ? prev.filter((c) => c !== cap) : [...prev, cap]);
+  }
+
+  if (editing) {
+    return (
+      <div className="px-3 py-3 rounded-md bg-muted/40 border border-border/60 space-y-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div className="space-y-1">
+            <label className="text-[11px] font-medium text-muted-foreground">Model ID</label>
+            <Input
+              value={editModelId}
+              onChange={(e) => setEditModelId(e.target.value)}
+              className="h-7 text-xs font-mono"
+              placeholder="meta-llama/llama-3-70b"
+              dir="ltr"
+              autoFocus
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[11px] font-medium text-muted-foreground">الاسم الظاهر</label>
+            <Input
+              value={editLabel}
+              onChange={(e) => setEditLabel(e.target.value)}
+              className="h-7 text-xs"
+              placeholder="Llama 3 70B"
+            />
+          </div>
+        </div>
+        <div className="space-y-1">
+          <label className="text-[11px] font-medium text-muted-foreground">القدرات</label>
+          <div className="flex flex-wrap gap-1.5">
+            {Object.entries(CAPABILITY_LABELS).map(([cap, label]) => (
+              <button
+                key={cap}
+                type="button"
+                onClick={() => toggleCap(cap)}
+                className={`text-[11px] px-2 py-0.5 rounded border transition-colors ${
+                  editCaps.includes(cap)
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "bg-muted/50 text-muted-foreground border-border hover:bg-muted"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <Button
+            size="sm" className="h-7 text-xs gap-1"
+            onClick={() => updateModel.mutate({
+              label: editLabel.trim() || editModelId.trim(),
+              modelId: editModelId.trim(),
+              capabilities: editCaps.join(","),
+            })}
+            disabled={!editModelId.trim() || updateModel.isPending}
+          >
+            {updateModel.isPending
+              ? <div className="size-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+              : <Check className="size-3" />
+            }
+            حفظ
+          </Button>
+          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setEditing(false)}>
+            <X className="size-3 mr-1" /> إلغاء
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-muted/40 border border-border/40">
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-medium truncate">{model.label}</span>
+          {model.capabilities.split(",").filter(Boolean).map((cap) => (
+            <span key={cap} className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary shrink-0">
+              {CAPABILITY_LABELS[cap] ?? cap}
+            </span>
+          ))}
+        </div>
+        <span className="text-xs font-mono text-muted-foreground">{model.modelId}</span>
+      </div>
+      <div className="flex items-center gap-0.5 shrink-0">
+        <Button
+          variant="ghost" size="sm" className="h-6 w-6 p-0"
+          onClick={() => { setEditLabel(model.label); setEditModelId(model.modelId); setEditing(true); }}
+        >
+          <Edit3 className="size-3" />
+        </Button>
+        <Button
+          variant="ghost" size="sm" className="h-6 w-6 p-0 text-destructive hover:text-destructive"
+          onClick={onDelete} disabled={isDeleting}
+        >
+          <Trash2 className="size-3" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Provider Card ────────────────────────────────────────────────────────────
 
 function ProviderCard({ provider, onRefresh }: { provider: Provider; onRefresh: () => void }) {
@@ -244,6 +385,9 @@ function ProviderCard({ provider, onRefresh }: { provider: Provider; onRefresh: 
   const [showAddModel, setShowAddModel] = useState(false);
   const [editingKey, setEditingKey] = useState(false);
   const [newKey, setNewKey] = useState("");
+  const [editingInfo, setEditingInfo] = useState(false);
+  const [editName, setEditName] = useState(provider.name);
+  const [editBaseUrl, setEditBaseUrl] = useState(provider.baseUrl);
 
   const updateProvider = useMutation({
     mutationFn: (data: Record<string, unknown>) =>
@@ -255,6 +399,7 @@ function ProviderCard({ provider, onRefresh }: { provider: Provider; onRefresh: 
     onSuccess: () => {
       toast({ title: "✅ تم التحديث" });
       setEditingKey(false);
+      setEditingInfo(false);
       setNewKey("");
       onRefresh();
     },
@@ -278,74 +423,149 @@ function ProviderCard({ provider, onRefresh }: { provider: Provider; onRefresh: 
     ? "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300"
     : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300";
 
+  function startEditInfo() {
+    setEditName(provider.name);
+    setEditBaseUrl(provider.baseUrl);
+    setEditingInfo(true);
+    setEditingKey(false);
+  }
+
+  function cancelEditInfo() {
+    setEditingInfo(false);
+    setEditName(provider.name);
+    setEditBaseUrl(provider.baseUrl);
+  }
+
+  function saveInfo() {
+    if (!editName.trim() || !editBaseUrl.trim()) return;
+    updateProvider.mutate({ name: editName.trim(), baseUrl: editBaseUrl.trim() });
+  }
+
   return (
     <Card className={!provider.isActive ? "opacity-60" : ""}>
       <CardHeader className="pb-3">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${typeColor}`}>
-              {provider.type === "openrouter" ? "🌐 OpenRouter" : "🔧 Custom AI"}
-            </span>
-            <span className="font-semibold text-sm">{provider.name}</span>
-            <Badge variant="outline" className="text-xs">{provider.models.length} موديل</Badge>
-          </div>
-          <div className="flex items-center gap-1 shrink-0">
-            <Switch
-              checked={provider.isActive}
-              onCheckedChange={(v) => updateProvider.mutate({ isActive: v })}
-              className="scale-75"
-            />
-            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setExpanded((e) => !e)}>
-              {expanded ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
-            </Button>
-            <Button
-              variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:text-destructive"
-              onClick={() => deleteProvider.mutate()} disabled={deleteProvider.isPending}
-            >
-              <Trash2 className="size-3.5" />
-            </Button>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
-          <Globe className="size-3 shrink-0" />
-          <span className="font-mono truncate">{provider.baseUrl}</span>
-        </div>
-
-        <div className="flex items-center gap-2 text-xs mt-1">
-          {editingKey ? (
-            <div className="flex gap-2 flex-1">
+        {editingInfo ? (
+          /* ── Inline edit form for name + baseUrl ── */
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">اسم المزود</label>
               <Input
-                type="password"
-                placeholder="المفتاح الجديد..."
-                value={newKey}
-                onChange={(e) => setNewKey(e.target.value)}
-                className="h-7 text-xs font-mono flex-1"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className="h-8 text-sm"
+                placeholder="اسم المزود"
+                autoFocus
               />
-              <Button size="sm" className="h-7 text-xs"
-                onClick={() => updateProvider.mutate({ apiKey: newKey })}
-                disabled={!newKey.trim() || updateProvider.isPending}
+            </div>
+            {provider.type === "custom" && (
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Base URL</label>
+                <Input
+                  value={editBaseUrl}
+                  onChange={(e) => setEditBaseUrl(e.target.value)}
+                  className="h-8 text-sm font-mono"
+                  placeholder="https://api.example.com/v1"
+                  dir="ltr"
+                />
+              </div>
+            )}
+            <div className="flex gap-2">
+              <Button
+                size="sm" className="h-7 text-xs gap-1"
+                onClick={saveInfo}
+                disabled={!editName.trim() || !editBaseUrl.trim() || updateProvider.isPending}
               >
-                <Check className="size-3" />
+                {updateProvider.isPending
+                  ? <div className="size-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  : <Check className="size-3" />
+                }
+                حفظ
               </Button>
-              <Button variant="ghost" size="sm" className="h-7 text-xs"
-                onClick={() => { setEditingKey(false); setNewKey(""); }}
-              >
-                <X className="size-3" />
+              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={cancelEditInfo}>
+                <X className="size-3 mr-1" /> إلغاء
               </Button>
             </div>
-          ) : (
-            <>
-              <span className="font-mono text-muted-foreground">{provider.apiKey}</span>
-              <Button variant="ghost" size="sm" className="h-6 text-xs px-1.5" onClick={() => setEditingKey(true)}>
-                <Edit3 className="size-3 mr-1" /> تغيير المفتاح
-              </Button>
-            </>
-          )}
-        </div>
+          </div>
+        ) : (
+          /* ── Normal header view ── */
+          <>
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${typeColor}`}>
+                  {provider.type === "openrouter" ? "🌐 OpenRouter" : "🔧 Custom AI"}
+                </span>
+                <span className="font-semibold text-sm">{provider.name}</span>
+                <Badge variant="outline" className="text-xs">{provider.models.length} موديل</Badge>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <Switch
+                  checked={provider.isActive}
+                  onCheckedChange={(v) => updateProvider.mutate({ isActive: v })}
+                  className="scale-75"
+                />
+                <Button
+                  variant="ghost" size="sm" className="h-7 w-7 p-0"
+                  title="تعديل"
+                  onClick={startEditInfo}
+                >
+                  <Edit3 className="size-3.5" />
+                </Button>
+                <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setExpanded((e) => !e)}>
+                  {expanded ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+                </Button>
+                <Button
+                  variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                  onClick={() => deleteProvider.mutate()} disabled={deleteProvider.isPending}
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
+              <Globe className="size-3 shrink-0" />
+              <span className="font-mono truncate">{provider.baseUrl}</span>
+            </div>
+
+            <div className="flex items-center gap-2 text-xs mt-1">
+              {editingKey ? (
+                <div className="flex gap-2 flex-1">
+                  <Input
+                    type="password"
+                    placeholder="المفتاح الجديد..."
+                    value={newKey}
+                    onChange={(e) => setNewKey(e.target.value)}
+                    className="h-7 text-xs font-mono flex-1"
+                    autoFocus
+                  />
+                  <Button size="sm" className="h-7 text-xs"
+                    onClick={() => updateProvider.mutate({ apiKey: newKey })}
+                    disabled={!newKey.trim() || updateProvider.isPending}
+                  >
+                    <Check className="size-3" />
+                  </Button>
+                  <Button variant="ghost" size="sm" className="h-7 text-xs"
+                    onClick={() => { setEditingKey(false); setNewKey(""); }}
+                  >
+                    <X className="size-3" />
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <span className="font-mono text-muted-foreground">{provider.apiKey}</span>
+                  <Button variant="ghost" size="sm" className="h-6 text-xs px-1.5"
+                    onClick={() => { setEditingKey(true); setEditingInfo(false); }}
+                  >
+                    <Edit3 className="size-3 mr-1" /> تغيير المفتاح
+                  </Button>
+                </>
+              )}
+            </div>
+          </>
+        )}
       </CardHeader>
 
-      {expanded && (
+      {expanded && !editingInfo && (
         <CardContent className="pt-0 space-y-2">
           <Separator />
           {provider.models.length === 0 ? (
@@ -355,27 +575,14 @@ function ProviderCard({ provider, onRefresh }: { provider: Provider; onRefresh: 
           ) : (
             <div className="space-y-1.5">
               {provider.models.map((model) => (
-                <div key={model.id}
-                  className="flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-muted/40 border border-border/40"
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-medium truncate">{model.label}</span>
-                      {model.capabilities.split(",").filter(Boolean).map((cap) => (
-                        <span key={cap} className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary shrink-0">
-                          {CAPABILITY_LABELS[cap] ?? cap}
-                        </span>
-                      ))}
-                    </div>
-                    <span className="text-xs font-mono text-muted-foreground">{model.modelId}</span>
-                  </div>
-                  <Button
-                    variant="ghost" size="sm" className="h-6 w-6 p-0 text-destructive hover:text-destructive shrink-0"
-                    onClick={() => deleteModel.mutate(model.id)} disabled={deleteModel.isPending}
-                  >
-                    <Trash2 className="size-3" />
-                  </Button>
-                </div>
+                <ModelRow
+                  key={model.id}
+                  model={model}
+                  onDelete={() => deleteModel.mutate(model.id)}
+                  onRefresh={onRefresh}
+                  providerId={provider.id}
+                  isDeleting={deleteModel.isPending}
+                />
               ))}
             </div>
           )}
