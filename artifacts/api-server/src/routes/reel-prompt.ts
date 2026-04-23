@@ -1,7 +1,6 @@
 import { Router, type IRouter } from "express";
 import { and, count, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { getAuth } from "@clerk/express";
-import { getUserKey } from "./user-keys";
 import {
   CreateAnalysisBody,
   CreateNicheBody,
@@ -44,6 +43,7 @@ import {
 } from "@workspace/db";
 import { buildAIVideoPromptPack, buildAIUrlOnlyPromptPack, buildDemoPromptPack, buildRemixPromptPack } from "../lib/prompt-generator";
 import { loadSystemPrompt, ensureAllSystemPromptsSeeded, syncDefaultSystemPrompts, DEFAULT_SYSTEM_PROMPTS } from "../lib/ai-system-prompts";
+import { getServiceModel } from "./ai-providers";
 
 const router: IRouter = Router();
 let seedDataPromise: Promise<void> | undefined;
@@ -320,17 +320,6 @@ router.post("/analyses", async (req, res): Promise<void> => {
     return;
   }
 
-  const provider = await ensureProviderSettings();
-  if (!parsed.data.demoMode) {
-    res.status(422).json({
-      error: "Real AI video analysis is not enabled yet.",
-      details: provider.realAnalysisEnabled
-        ? "Provider readiness is enabled, but no production analysis executor is connected in this build."
-        : "Use demo mode to validate the workflow, or connect a production provider implementation before running real analysis.",
-    });
-    return;
-  }
-
   const videoFrames = parsed.data.videoFrames ?? [];
   const reelUrl = parsed.data.reelUrl?.trim() ?? "";
 
@@ -342,29 +331,46 @@ router.post("/analyses", async (req, res): Promise<void> => {
     return;
   }
 
-  let generated: ReturnType<typeof buildDemoPromptPack>;
-  try {
-    const videoSystem = await loadSystemPrompt("video-analysis", { withModel: true }).catch(() => null);
+  // Check if a real AI model is configured for video-analysis
+  const configuredModel = await getServiceModel("video-analysis");
+  const hasRealAI = !!configuredModel ||
+    !!(process.env["AI_INTEGRATIONS_OPENAI_BASE_URL"] && process.env["AI_INTEGRATIONS_OPENAI_API_KEY"]);
 
-    if (videoFrames.length > 0) {
-      generated = await buildAIVideoPromptPack({
+  // Use demo mode if: explicitly requested OR no AI is configured
+  const useDemo = parsed.data.demoMode || !hasRealAI;
+
+  let generated: ReturnType<typeof buildDemoPromptPack>;
+  let usedProviderMode: "demo" | "provider" = useDemo ? "demo" : "provider";
+
+  try {
+    if (useDemo) {
+      generated = buildDemoPromptPack({
         niche,
         concept: parsed.data.concept,
         reelNotes: parsed.data.reelNotes,
-        videoFrames,
-        videoDataUrl: parsed.data.videoDataUrl,
-        systemPromptOverride: videoSystem?.systemPrompt,
-        modelOverride: videoSystem?.modelOverride,
       });
     } else {
-      generated = await buildAIUrlOnlyPromptPack({
-        niche,
-        concept: parsed.data.concept,
-        reelUrl,
-        reelNotes: parsed.data.reelNotes,
-        systemPromptOverride: videoSystem?.systemPrompt,
-        modelOverride: videoSystem?.modelOverride,
-      });
+      const videoSystem = await loadSystemPrompt("video-analysis", { withModel: true }).catch(() => null);
+      if (videoFrames.length > 0) {
+        generated = await buildAIVideoPromptPack({
+          niche,
+          concept: parsed.data.concept,
+          reelNotes: parsed.data.reelNotes,
+          videoFrames,
+          videoDataUrl: parsed.data.videoDataUrl,
+          systemPromptOverride: videoSystem?.systemPrompt,
+          modelOverride: videoSystem?.modelOverride,
+        });
+      } else {
+        generated = await buildAIUrlOnlyPromptPack({
+          niche,
+          concept: parsed.data.concept,
+          reelUrl,
+          reelNotes: parsed.data.reelNotes,
+          systemPromptOverride: videoSystem?.systemPrompt,
+          modelOverride: videoSystem?.modelOverride,
+        });
+      }
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "AI video analysis failed.";
@@ -386,7 +392,7 @@ router.post("/analyses", async (req, res): Promise<void> => {
       concept: parsed.data.concept,
       status: "completed",
       summaryPrompt: generated.summaryPrompt,
-      providerMode: "provider",
+      providerMode: usedProviderMode,
     })
     .returning();
 
@@ -648,14 +654,12 @@ router.get("/prompt-packs/:promptPackId/story-summary", async (req, res): Promis
     return;
   }
 
-  // Resolve AI credentials: user's own key takes priority over Replit integration
-  const authCtx = getAuth(req);
-  const userOpenAiKey = authCtx?.userId ? await getUserKey(authCtx.userId, "openai") : null;
-  const baseUrl = userOpenAiKey
-    ? "https://api.openai.com/v1"
-    : process.env["AI_INTEGRATIONS_OPENAI_BASE_URL"];
-  const apiKey = userOpenAiKey ?? process.env["AI_INTEGRATIONS_OPENAI_API_KEY"];
-  if (!baseUrl || !apiKey) { res.status(503).json({ error: "AI access is not configured. أضف مفتاح OpenAI في إعداداتك." }); return; }
+  // Resolve AI credentials via new provider system, then env var fallback
+  const summaryModel = await getServiceModel("story-summary");
+  const baseUrl = summaryModel?.baseUrl ?? process.env["AI_INTEGRATIONS_OPENAI_BASE_URL"];
+  const apiKey = summaryModel?.apiKey ?? process.env["AI_INTEGRATIONS_OPENAI_API_KEY"];
+  const modelId = summaryModel?.modelId ?? "gpt-5.2";
+  if (!baseUrl || !apiKey) { res.status(503).json({ error: "لم يتم تكوين أي مزود ذكاء اصطناعي. أضف مزوداً في الإعدادات." }); return; }
 
   const scenesText = scenes
     .map((s) => `المشهد ${s.sceneNumber} — ${s.title}\nالصورة: ${s.imagePrompt.slice(0, 400)}\nالحوار: ${s.voiceOverDarija.slice(0, 400)}`)
@@ -669,7 +673,7 @@ router.get("/prompt-packs/:promptPackId/story-summary", async (req, res): Promis
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "gpt-5.2",
+      model: modelId,
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: systemPromptText },
