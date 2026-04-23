@@ -5,6 +5,7 @@ import frameSessionsRouter from "./frame-sessions";
 import generationRouter from "./generation";
 import userKeysRouter from "./user-keys";
 import adminRouter from "./admin";
+import aiProvidersRouter from "./ai-providers";
 
 const router: IRouter = Router();
 
@@ -14,5 +15,6 @@ router.use(reelPromptRouter);
 router.use(frameSessionsRouter);
 router.use(generationRouter);
 router.use(adminRouter);
+router.use(aiProvidersRouter);
 
 export default router;

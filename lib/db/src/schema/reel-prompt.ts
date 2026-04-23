@@ -112,6 +112,46 @@ export const siteSettingsTable = pgTable("site_settings", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });
 
+// ─── New AI Provider System ───────────────────────────────────────────────────
+
+export const aiProvidersTable = pgTable("ai_providers", {
+  id: serial("id").primaryKey(),
+  type: text("type").notNull(), // 'openrouter' | 'custom'
+  name: text("name").notNull(),
+  baseUrl: text("base_url").notNull(),
+  apiKey: text("api_key").notNull(),
+  isActive: boolean("is_active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
+});
+
+export const aiProviderModelsTable = pgTable("ai_provider_models", {
+  id: serial("id").primaryKey(),
+  providerId: integer("provider_id").notNull().references(() => aiProvidersTable.id, { onDelete: "cascade" }),
+  modelId: text("model_id").notNull(), // e.g. "openai/gpt-4o", "meta-llama/llama-3.1-70b-instruct"
+  label: text("label").notNull(), // display name
+  capabilities: text("capabilities").notNull().default("analysis"), // comma-separated: "analysis,images,vision"
+  isActive: boolean("is_active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const aiServiceAssignmentsTable = pgTable("ai_service_assignments", {
+  id: serial("id").primaryKey(),
+  serviceName: text("service_name").notNull().unique(), // 'video-analysis','remix','story-summary','image-generation'
+  modelId: integer("model_id").references(() => aiProviderModelsTable.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
+});
+
+export const insertAiProviderSchema = createInsertSchema(aiProvidersTable).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertAiProviderModelSchema = createInsertSchema(aiProviderModelsTable).omit({ id: true, createdAt: true });
+export type AiProvider = typeof aiProvidersTable.$inferSelect;
+export type AiProviderModel = typeof aiProviderModelsTable.$inferSelect;
+export type AiServiceAssignment = typeof aiServiceAssignmentsTable.$inferSelect;
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export const announcementsTable = pgTable("announcements", {
   id: serial("id").primaryKey(),
   title: text("title"),

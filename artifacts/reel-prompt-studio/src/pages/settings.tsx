@@ -1,757 +1,768 @@
-import { useGetProviderSettings, useUpdateProviderSettings, getGetProviderSettingsQueryKey, getGetDashboardSummaryQueryKey } from "@workspace/api-client-react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
+import { useState, useEffect } from "react";
+import {
+  Settings as SettingsIcon,
+  Plus,
+  Trash2,
+  Edit3,
+  Check,
+  X,
+  ChevronDown,
+  ChevronUp,
+  Zap,
+  Globe,
+  Link2,
+  RefreshCw,
+  AlertTriangle,
+  CheckCircle2,
+  Info,
+  Bot,
+} from "lucide-react";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
-import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
-import { Settings as SettingsIcon, Key, AlertTriangle, Sparkles, Film, Info, CheckCircle2, Trash2, Lock, ShieldCheck } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
-import { Skeleton } from "@/components/ui/skeleton";
-import { z } from "zod";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useEffect, useState, useCallback } from "react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { format } from "date-fns";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { useToast } from "@/hooks/use-toast";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Separator } from "@/components/ui/separator";
 
-const API_KEY_TYPES = [
-  {
-    key: "openai",
-    label: "OpenAI",
-    hint: "لتحليل الفيديو، Remix، وملخص القصة (gpt-5.2)",
-    placeholder: "sk-...",
-    link: "platform.openai.com/api-keys",
-    color: "emerald",
-  },
-  {
-    key: "fal",
-    label: "fal.ai",
-    hint: "لتوليد الصور (FLUX) والفيديو (Veo 3، Kling)",
-    placeholder: "fal_...",
-    link: "fal.ai/dashboard",
-    color: "violet",
-  },
-  {
-    key: "bfl",
-    label: "BFL (Black Forest Labs)",
-    hint: "لتوليد الصور مباشرة عبر FLUX Pro/Dev",
-    placeholder: "bfl_...",
-    link: "api.bfl.ai/settings",
-    color: "amber",
-  },
-  {
-    key: "google",
-    label: "Google AI Studio",
-    hint: "لتوليد الفيديو مباشرة عبر Veo 3",
-    placeholder: "AIza...",
-    link: "aistudio.google.com/apikey",
-    color: "blue",
-  },
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+type ProviderModel = {
+  id: number;
+  providerId: number;
+  modelId: string;
+  label: string;
+  capabilities: string;
+  isActive: boolean;
+  sortOrder: number;
+};
+
+type Provider = {
+  id: number;
+  type: "openrouter" | "custom";
+  name: string;
+  baseUrl: string;
+  apiKey: string;
+  isActive: boolean;
+  sortOrder: number;
+  models: ProviderModel[];
+};
+
+type ServiceAssignment = {
+  key: string;
+  label: string;
+  description: string;
+  assignedModelId: number | null;
+  assignedModel: {
+    id: number;
+    modelId: string;
+    label: string;
+    providerName: string;
+    providerType: string;
+  } | null;
+};
+
+type AvailableModel = {
+  id: number;
+  modelId: string;
+  label: string;
+  capabilities: string;
+  providerId: number;
+  providerName: string;
+  providerType: string;
+};
+
+// ─── API helpers ─────────────────────────────────────────────────────────────
+
+async function apiFetch(url: string, opts?: RequestInit) {
+  const res = await fetch(url, { credentials: "include", ...opts });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(err.error ?? `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+// Popular OpenRouter models to suggest
+const OPENROUTER_SUGGESTIONS = [
+  { modelId: "openai/gpt-4o", label: "GPT-4o (OpenAI)", capabilities: "analysis,vision" },
+  { modelId: "openai/gpt-4o-mini", label: "GPT-4o Mini (OpenAI)", capabilities: "analysis" },
+  { modelId: "anthropic/claude-3.5-sonnet", label: "Claude 3.5 Sonnet (Anthropic)", capabilities: "analysis,vision" },
+  { modelId: "anthropic/claude-3-haiku", label: "Claude 3 Haiku (Anthropic)", capabilities: "analysis" },
+  { modelId: "google/gemini-2.0-flash-exp", label: "Gemini 2.0 Flash (Google)", capabilities: "analysis,vision" },
+  { modelId: "google/gemini-pro-1.5", label: "Gemini 1.5 Pro (Google)", capabilities: "analysis,vision" },
+  { modelId: "meta-llama/llama-3.3-70b-instruct", label: "Llama 3.3 70B (Meta)", capabilities: "analysis" },
+  { modelId: "qwen/qwen-2.5-72b-instruct", label: "Qwen 2.5 72B (Alibaba)", capabilities: "analysis" },
+  { modelId: "deepseek/deepseek-r1", label: "DeepSeek R1", capabilities: "analysis" },
+  { modelId: "mistralai/mistral-large", label: "Mistral Large", capabilities: "analysis" },
 ];
 
-function UserApiKeysCard() {
+const CAPABILITY_LABELS: Record<string, string> = {
+  analysis: "تحليل النصوص",
+  vision: "رؤية الصور/الفيديو",
+  images: "توليد الصور",
+};
+
+// ─── Model Form ───────────────────────────────────────────────────────────────
+
+function AddModelForm({
+  providerId,
+  providerType,
+  onAdded,
+  onCancel,
+}: {
+  providerId: number;
+  providerType: "openrouter" | "custom";
+  onAdded: () => void;
+  onCancel: () => void;
+}) {
   const { toast } = useToast();
-  const [editingKey, setEditingKey] = useState<string | null>(null);
-  const [inputValues, setInputValues] = useState<Record<string, string>>({});
-  const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
+  const [modelId, setModelId] = useState("");
+  const [label, setLabel] = useState("");
+  const [capabilities, setCapabilities] = useState("analysis");
+  const [selectedSuggestion, setSelectedSuggestion] = useState<string>("");
 
-  const { data, isLoading, refetch } = useQuery<{ keys: Record<string, string> }>({
-    queryKey: ["user-api-keys"],
-    queryFn: async () => {
-      const res = await fetch("/api/user-keys", { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to fetch keys");
-      return res.json();
-    },
-  });
-
-  const saveMutation = useMutation({
-    mutationFn: async ({ keyType, apiKey }: { keyType: string; apiKey: string }) => {
-      const res = await fetch(`/api/user-keys/${keyType}`, {
-        method: "PUT",
-        credentials: "include",
+  const addMutation = useMutation({
+    mutationFn: () =>
+      apiFetch(`/api/ai-providers/${providerId}/models`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({})) as { error?: string };
-        throw new Error(err.error ?? "Failed to save");
-      }
+        body: JSON.stringify({ modelId: modelId.trim(), label: label.trim() || modelId.trim(), capabilities }),
+      }),
+    onSuccess: () => {
+      toast({ title: "✅ تم إضافة الموديل" });
+      onAdded();
     },
-    onSuccess: (_, { keyType }) => {
-      toast({ title: "✅ تم الحفظ", description: `مفتاح ${keyType} حُفظ في حسابك` });
-      setEditingKey(null);
-      setInputValues((v) => ({ ...v, [keyType]: "" }));
-      refetch();
-    },
-    onError: (err) => {
-      toast({ title: "خطأ", description: err.message, variant: "destructive" });
-    },
+    onError: (err) => toast({ title: "خطأ", description: err.message, variant: "destructive" }),
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: async (keyType: string) => {
-      const res = await fetch(`/api/user-keys/${keyType}`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-      if (!res.ok) throw new Error("Failed to delete");
-    },
-    onSuccess: (_, keyType) => {
-      toast({ title: "🗑️ تم الحذف", description: `مفتاح ${keyType} حُذف` });
-      refetch();
-    },
-    onError: (err) => {
-      toast({ title: "خطأ", description: err.message, variant: "destructive" });
-    },
-  });
-
-  const maskedKeys = data?.keys ?? {};
+  function applySuggestion(sug: typeof OPENROUTER_SUGGESTIONS[0]) {
+    setModelId(sug.modelId);
+    setLabel(sug.label);
+    setCapabilities(sug.capabilities);
+    setSelectedSuggestion(sug.modelId);
+  }
 
   return (
-    <Card className="border-violet-200/60 dark:border-violet-800/30 bg-gradient-to-br from-violet-50/40 to-indigo-50/20 dark:from-violet-950/20 dark:to-indigo-950/10">
+    <div className="border border-dashed border-border rounded-lg p-4 space-y-3 bg-muted/20">
+      {providerType === "openrouter" && (
+        <div>
+          <p className="text-xs text-muted-foreground mb-2 font-medium">اختر من الموديلات الشهيرة:</p>
+          <div className="flex flex-wrap gap-1.5">
+            {OPENROUTER_SUGGESTIONS.map((sug) => (
+              <button
+                key={sug.modelId}
+                onClick={() => applySuggestion(sug)}
+                className={`text-xs px-2 py-1 rounded border transition-colors ${
+                  selectedSuggestion === sug.modelId
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "border-border hover:border-primary/50 hover:bg-accent"
+                }`}
+              >
+                {sug.label.split("(")[0].trim()}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">معرّف الموديل (Model ID)</label>
+          <Input
+            placeholder={providerType === "openrouter" ? "openai/gpt-4o" : "gpt-4o"}
+            value={modelId}
+            onChange={(e) => setModelId(e.target.value)}
+            className="font-mono text-sm h-8"
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">الاسم المعروض</label>
+          <Input
+            placeholder="GPT-4o — تحليل الفيديو"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            className="text-sm h-8"
+          />
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-muted-foreground">القدرات</label>
+        <div className="flex flex-wrap gap-3">
+          {["analysis", "vision", "images"].map((cap) => (
+            <label key={cap} className="flex items-center gap-1.5 text-xs cursor-pointer">
+              <input
+                type="checkbox"
+                checked={capabilities.split(",").includes(cap)}
+                onChange={(e) => {
+                  const caps = capabilities.split(",").filter(Boolean);
+                  if (e.target.checked) {
+                    setCapabilities([...caps, cap].join(","));
+                  } else {
+                    setCapabilities(caps.filter((c) => c !== cap).join(",") || "analysis");
+                  }
+                }}
+                className="rounded"
+              />
+              {CAPABILITY_LABELS[cap]}
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          onClick={() => addMutation.mutate()}
+          disabled={addMutation.isPending || !modelId.trim()}
+          className="h-7"
+        >
+          <Plus className="size-3 mr-1" />
+          إضافة
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onCancel} className="h-7">
+          إلغاء
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Provider Card ────────────────────────────────────────────────────────────
+
+function ProviderCard({ provider, onRefresh }: { provider: Provider; onRefresh: () => void }) {
+  const { toast } = useToast();
+  const [expanded, setExpanded] = useState(true);
+  const [showAddModel, setShowAddModel] = useState(false);
+  const [editingKey, setEditingKey] = useState(false);
+  const [newKey, setNewKey] = useState("");
+
+  const updateProvider = useMutation({
+    mutationFn: (data: Record<string, unknown>) =>
+      apiFetch(`/api/ai-providers/${provider.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => {
+      toast({ title: "✅ تم التحديث" });
+      setEditingKey(false);
+      setNewKey("");
+      onRefresh();
+    },
+    onError: (err) => toast({ title: "خطأ", description: err.message, variant: "destructive" }),
+  });
+
+  const deleteProvider = useMutation({
+    mutationFn: () => apiFetch(`/api/ai-providers/${provider.id}`, { method: "DELETE" }),
+    onSuccess: () => { toast({ title: "🗑️ تم حذف المزود" }); onRefresh(); },
+    onError: (err) => toast({ title: "خطأ", description: err.message, variant: "destructive" }),
+  });
+
+  const deleteModel = useMutation({
+    mutationFn: (modelId: number) =>
+      apiFetch(`/api/ai-providers/models/${modelId}`, { method: "DELETE" }),
+    onSuccess: () => { toast({ title: "🗑️ تم حذف الموديل" }); onRefresh(); },
+    onError: (err) => toast({ title: "خطأ", description: err.message, variant: "destructive" }),
+  });
+
+  const typeColor = provider.type === "openrouter"
+    ? "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300"
+    : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300";
+
+  return (
+    <Card className={!provider.isActive ? "opacity-60" : ""}>
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${typeColor}`}>
+              {provider.type === "openrouter" ? "🌐 OpenRouter" : "🔧 Custom AI"}
+            </span>
+            <span className="font-semibold text-sm">{provider.name}</span>
+            <Badge variant="outline" className="text-xs">{provider.models.length} موديل</Badge>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <Switch
+              checked={provider.isActive}
+              onCheckedChange={(v) => updateProvider.mutate({ isActive: v })}
+              className="scale-75"
+            />
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setExpanded((e) => !e)}>
+              {expanded ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+            </Button>
+            <Button
+              variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+              onClick={() => deleteProvider.mutate()} disabled={deleteProvider.isPending}
+            >
+              <Trash2 className="size-3.5" />
+            </Button>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
+          <Globe className="size-3 shrink-0" />
+          <span className="font-mono truncate">{provider.baseUrl}</span>
+        </div>
+
+        <div className="flex items-center gap-2 text-xs mt-1">
+          {editingKey ? (
+            <div className="flex gap-2 flex-1">
+              <Input
+                type="password"
+                placeholder="المفتاح الجديد..."
+                value={newKey}
+                onChange={(e) => setNewKey(e.target.value)}
+                className="h-7 text-xs font-mono flex-1"
+              />
+              <Button size="sm" className="h-7 text-xs"
+                onClick={() => updateProvider.mutate({ apiKey: newKey })}
+                disabled={!newKey.trim() || updateProvider.isPending}
+              >
+                <Check className="size-3" />
+              </Button>
+              <Button variant="ghost" size="sm" className="h-7 text-xs"
+                onClick={() => { setEditingKey(false); setNewKey(""); }}
+              >
+                <X className="size-3" />
+              </Button>
+            </div>
+          ) : (
+            <>
+              <span className="font-mono text-muted-foreground">{provider.apiKey}</span>
+              <Button variant="ghost" size="sm" className="h-6 text-xs px-1.5" onClick={() => setEditingKey(true)}>
+                <Edit3 className="size-3 mr-1" /> تغيير المفتاح
+              </Button>
+            </>
+          )}
+        </div>
+      </CardHeader>
+
+      {expanded && (
+        <CardContent className="pt-0 space-y-2">
+          <Separator />
+          {provider.models.length === 0 ? (
+            <p className="text-xs text-muted-foreground text-center py-3">
+              لا توجد موديلات — أضف موديلاً للبدء
+            </p>
+          ) : (
+            <div className="space-y-1.5">
+              {provider.models.map((model) => (
+                <div key={model.id}
+                  className="flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-muted/40 border border-border/40"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-medium truncate">{model.label}</span>
+                      {model.capabilities.split(",").filter(Boolean).map((cap) => (
+                        <span key={cap} className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary shrink-0">
+                          {CAPABILITY_LABELS[cap] ?? cap}
+                        </span>
+                      ))}
+                    </div>
+                    <span className="text-xs font-mono text-muted-foreground">{model.modelId}</span>
+                  </div>
+                  <Button
+                    variant="ghost" size="sm" className="h-6 w-6 p-0 text-destructive hover:text-destructive shrink-0"
+                    onClick={() => deleteModel.mutate(model.id)} disabled={deleteModel.isPending}
+                  >
+                    <Trash2 className="size-3" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {showAddModel ? (
+            <AddModelForm
+              providerId={provider.id}
+              providerType={provider.type}
+              onAdded={() => { setShowAddModel(false); onRefresh(); }}
+              onCancel={() => setShowAddModel(false)}
+            />
+          ) : (
+            <Button variant="outline" size="sm" className="w-full h-8 text-xs border-dashed"
+              onClick={() => setShowAddModel(true)}
+            >
+              <Plus className="size-3 mr-1" /> إضافة موديل
+            </Button>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+// ─── Add Provider Form ────────────────────────────────────────────────────────
+
+function AddProviderForm({
+  type,
+  onAdded,
+  onCancel,
+}: {
+  type: "openrouter" | "custom";
+  onAdded: () => void;
+  onCancel: () => void;
+}) {
+  const { toast } = useToast();
+  const [name, setName] = useState(type === "openrouter" ? "OpenRouter" : "");
+  const [baseUrl, setBaseUrl] = useState(type === "openrouter" ? "https://openrouter.ai/api/v1" : "");
+  const [apiKey, setApiKey] = useState("");
+
+  const addMutation = useMutation({
+    mutationFn: () =>
+      apiFetch("/api/ai-providers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type, name: name.trim(), baseUrl: baseUrl.trim(), apiKey: apiKey.trim() }),
+      }),
+    onSuccess: () => { toast({ title: "✅ تم إضافة المزود" }); onAdded(); },
+    onError: (err) => toast({ title: "خطأ", description: err.message, variant: "destructive" }),
+  });
+
+  return (
+    <div className="border border-dashed border-border rounded-lg p-4 space-y-3 bg-muted/20">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <label className="text-xs font-medium">اسم المزود</label>
+          <Input
+            placeholder={type === "openrouter" ? "OpenRouter" : "مزود مخصص"}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="h-8 text-sm"
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium">Base URL</label>
+          <Input
+            placeholder="https://openrouter.ai/api/v1"
+            value={baseUrl}
+            onChange={(e) => setBaseUrl(e.target.value)}
+            className="h-8 text-sm font-mono"
+            readOnly={type === "openrouter"}
+          />
+        </div>
+      </div>
+      <div className="space-y-1">
+        <label className="text-xs font-medium flex items-center gap-2">
+          API Key
+          {type === "openrouter" && (
+            <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer"
+              className="text-primary hover:underline text-xs font-normal"
+            >
+              احصل عليه من openrouter.ai/keys ↗
+            </a>
+          )}
+        </label>
+        <Input
+          type="password"
+          placeholder={type === "openrouter" ? "sk-or-v1-..." : "sk-..."}
+          value={apiKey}
+          onChange={(e) => setApiKey(e.target.value)}
+          className="h-8 text-sm font-mono"
+        />
+      </div>
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          onClick={() => addMutation.mutate()}
+          disabled={addMutation.isPending || !name.trim() || !baseUrl.trim() || !apiKey.trim()}
+          className="h-7"
+        >
+          <Plus className="size-3 mr-1" /> إضافة
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onCancel} className="h-7">إلغاء</Button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Service Assignments ──────────────────────────────────────────────────────
+
+function ServiceAssignmentsCard({
+  services,
+  availableModels,
+  onSaved,
+}: {
+  services: ServiceAssignment[];
+  availableModels: AvailableModel[];
+  onSaved: () => void;
+}) {
+  const { toast } = useToast();
+  const [assignments, setAssignments] = useState<Record<string, number | null>>({});
+
+  useEffect(() => {
+    const initial: Record<string, number | null> = {};
+    for (const svc of services) initial[svc.key] = svc.assignedModelId;
+    setAssignments(initial);
+  }, [services]);
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      apiFetch("/api/ai-service-assignments", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          assignments: Object.entries(assignments).map(([serviceName, modelId]) => ({ serviceName, modelId })),
+        }),
+      }),
+    onSuccess: () => { toast({ title: "✅ تم حفظ تعيينات الخدمات" }); onSaved(); },
+    onError: (err) => toast({ title: "خطأ", description: err.message, variant: "destructive" }),
+  });
+
+  return (
+    <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Lock className="size-5 text-violet-600" />
-          مفاتيح API الشخصية
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Link2 className="size-4 text-primary" />
+          ربط الخدمات بالموديلات
         </CardTitle>
         <CardDescription>
-          مفاتيحك مُخزّنة بأمان في حسابك — تُستخدم تلقائياً في التحليل والتوليد دون أن تُشارَك مع أي عضو آخر.
+          اختر الموديل المستخدم لكل خدمة من خدمات الذكاء الاصطناعي في الموقع
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {isLoading ? (
-          <Skeleton className="h-40 w-full" />
+        {availableModels.length === 0 ? (
+          <Alert>
+            <Info className="size-4" />
+            <AlertTitle>لا توجد موديلات متاحة</AlertTitle>
+            <AlertDescription>
+              أضف مزود ذكاء اصطناعي وموديلاته أولاً حتى تتمكن من ربط الخدمات
+            </AlertDescription>
+          </Alert>
         ) : (
-          API_KEY_TYPES.map((kt) => {
-            const hasSaved = !!maskedKeys[kt.key];
-            const isEditing = editingKey === kt.key;
-            return (
-              <div
-                key={kt.key}
-                className="flex flex-col gap-2 p-3 rounded-lg border border-border/50 bg-background/60"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-sm">{kt.label}</span>
-                    {hasSaved ? (
-                      <Badge variant="outline" className="text-[10px] text-emerald-600 border-emerald-300 bg-emerald-50 dark:bg-emerald-950/30">
-                        <CheckCircle2 className="size-2.5 mr-1" /> محفوظ: {maskedKeys[kt.key]}
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline" className="text-[10px] text-muted-foreground">غير مضاف</Badge>
-                    )}
+          <>
+            {services.map((svc) => (
+              <div key={svc.key} className="space-y-1.5">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm font-medium">{svc.label}</p>
+                    <p className="text-xs text-muted-foreground">{svc.description}</p>
                   </div>
-                  <div className="flex items-center gap-1">
-                    {hasSaved && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 w-7 p-0 text-destructive hover:text-destructive"
-                        onClick={() => deleteMutation.mutate(kt.key)}
-                        disabled={deleteMutation.isPending}
-                      >
-                        <Trash2 className="size-3.5" />
-                      </Button>
-                    )}
-                    <Button
-                      variant={isEditing ? "outline" : "secondary"}
-                      size="sm"
-                      className="h-7 text-xs"
-                      onClick={() => setEditingKey(isEditing ? null : kt.key)}
-                    >
-                      {isEditing ? "إلغاء" : hasSaved ? "تغيير" : "إضافة"}
-                    </Button>
-                  </div>
+                  {assignments[svc.key] ? (
+                    <Badge variant="outline" className="text-xs text-emerald-600 border-emerald-300 shrink-0">
+                      <CheckCircle2 className="size-3 mr-1" /> مربوط
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-xs text-muted-foreground shrink-0">
+                      <AlertTriangle className="size-3 mr-1" /> غير مربوط
+                    </Badge>
+                  )}
                 </div>
-                <p className="text-xs text-muted-foreground">{kt.hint}</p>
-                {isEditing && (
-                  <div className="flex gap-2 mt-1">
-                    <Input
-                      type={showKeys[kt.key] ? "text" : "password"}
-                      placeholder={kt.placeholder}
-                      value={inputValues[kt.key] ?? ""}
-                      onChange={(e) => setInputValues((v) => ({ ...v, [kt.key]: e.target.value }))}
-                      className="font-mono text-xs h-8"
-                      autoComplete="off"
-                    />
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 shrink-0 text-xs"
-                      onClick={() => setShowKeys((v) => ({ ...v, [kt.key]: !v[kt.key] }))}
-                    >
-                      {showKeys[kt.key] ? "إخفاء" : "إظهار"}
-                    </Button>
-                    <Button
-                      size="sm"
-                      className="h-8 shrink-0"
-                      onClick={() => saveMutation.mutate({ keyType: kt.key, apiKey: inputValues[kt.key] ?? "" })}
-                      disabled={saveMutation.isPending || !inputValues[kt.key]?.trim()}
-                    >
-                      حفظ
-                    </Button>
-                  </div>
-                )}
-                {!isEditing && (
-                  <a
-                    href={`https://${kt.link}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-[11px] text-violet-600 hover:underline"
-                  >
-                    احصل على مفتاحك من: {kt.link} ↗
-                  </a>
-                )}
+                <Select
+                  value={assignments[svc.key]?.toString() ?? "none"}
+                  onValueChange={(v) =>
+                    setAssignments((a) => ({ ...a, [svc.key]: v === "none" ? null : parseInt(v) }))
+                  }
+                >
+                  <SelectTrigger className="h-9 text-sm">
+                    <SelectValue placeholder="اختر موديلاً..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">— بدون تعيين (يستخدم الافتراضي) —</SelectItem>
+                    {availableModels.map((m) => (
+                      <SelectItem key={m.id} value={m.id.toString()}>
+                        <span className="flex items-center gap-2">
+                          <span className="text-xs text-muted-foreground">
+                            {m.providerType === "openrouter" ? "🌐" : "🔧"} {m.providerName}
+                          </span>
+                          <span>{m.label}</span>
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-            );
-          })
+            ))}
+
+            <Button
+              onClick={() => saveMutation.mutate()}
+              disabled={saveMutation.isPending}
+              className="w-full mt-2"
+            >
+              {saveMutation.isPending ? (
+                <><RefreshCw className="size-4 mr-2 animate-spin" /> جاري الحفظ...</>
+              ) : (
+                <><Check className="size-4 mr-2" /> حفظ التعيينات</>
+              )}
+            </Button>
+          </>
         )}
       </CardContent>
     </Card>
   );
 }
 
-const settingsSchema = z.object({
-  providerName: z.string().min(1, "Provider name is required"),
-  model: z.string().min(1, "Model is required"),
-  baseUrl: z.string().optional(),
-  apiKey: z.string().optional(),
-  clearApiKey: z.boolean().default(false),
-}).superRefine((value, context) => {
-  if (value.providerName === "custom" && !value.baseUrl?.trim()) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["baseUrl"],
-      message: "Base URL is required for a custom provider",
-    });
-  }
-});
-
-function normalizeProviderName(providerName: string) {
-  return providerName === "OpenAI compatible" ? "openai" : providerName;
-}
-
-const IMAGE_MODELS = [
-  { value: "flux-schnell", label: "FLUX Schnell (سريع — BFL)" },
-  { value: "flux-dev", label: "FLUX Dev (جودة — BFL)" },
-  { value: "flux-pro", label: "FLUX Pro (احترافي — BFL)" },
-  { value: "dalle3", label: "DALL-E 3 (OpenAI)" },
-  { value: "ideogram", label: "Ideogram 2.0" },
-  { value: "custom", label: "نموذج مخصص" },
-];
-
-const VIDEO_MODELS = [
-  { value: "veo-3", label: "Veo 3 (Google DeepMind) ✨" },
-  { value: "veo-2", label: "Veo 2 (Google)" },
-  { value: "kling-1.6", label: "Kling 1.6" },
-  { value: "runway-gen4", label: "Runway Gen-4" },
-  { value: "pika-2", label: "Pika 2.0" },
-  { value: "custom", label: "نموذج مخصص" },
-];
-
-const IMAGE_PROVIDERS = [
-  { value: "bfl-direct", label: "🍌 BFL Direct — api.bfl.ai (حسابك الخاص)" },
-  { value: "fal", label: "fal.ai (FLUX + models)" },
-  { value: "openai", label: "OpenAI (DALL-E)" },
-  { value: "custom", label: "Custom Endpoint" },
-];
-
-const IMAGE_PROVIDERS_HINTS: Record<string, string> = {
-  "bfl-direct": "احصل على مفتاحك من: api.bfl.ai/settings — يُحاسب مباشرة من حساب BFL",
-  "fal": "احصل على مفتاحك من: fal.ai/dashboard — يدعم FLUX + Veo + Kling",
-  "openai": "احصل على مفتاحك من: platform.openai.com/api-keys",
-  "custom": "أدخل API endpoint مخصص",
-};
-
-const VIDEO_PROVIDERS = [
-  { value: "fal", label: "fal.ai (Veo 3 + Kling + Runway) — موصى به" },
-  { value: "google", label: "Google AI Studio (Veo 3 مباشر)" },
-  { value: "runwayml", label: "Runway ML" },
-  { value: "custom", label: "Custom Endpoint" },
-];
-
-const VIDEO_PROVIDERS_HINTS: Record<string, string> = {
-  "fal": "مفتاح fal.ai — يدعم Veo 3, Kling 1.6, Runway Gen-4, Pika",
-  "google": "مفتاح Google AI Studio من: aistudio.google.com — يحتاج وصول Veo 3",
-  "runwayml": "مفتاح Runway من: app.runwayml.com/account/api-keys",
-  "custom": "أدخل API endpoint مخصص",
-};
-
-function useGenerationSettings() {
-  const [settings, setSettings] = useState<{
-    imageModel: string;
-    videoModel: string;
-    imageProvider: string;
-    videoProvider: string;
-    imageApiKey: string;
-    videoApiKey: string;
-  }>(() => {
-    try {
-      return JSON.parse(localStorage.getItem("reel-gen-settings") || "null") || {
-        imageModel: "flux-schnell",
-        videoModel: "veo-3",
-        imageProvider: "fal",
-        videoProvider: "fal",
-        imageApiKey: "",
-        videoApiKey: "",
-      };
-    } catch {
-      return {
-        imageModel: "flux-schnell",
-        videoModel: "veo-3",
-        imageProvider: "fal",
-        videoProvider: "fal",
-        imageApiKey: "",
-        videoApiKey: "",
-      };
-    }
-  });
-
-  const update = useCallback((updates: Partial<typeof settings>) => {
-    setSettings((prev) => {
-      const next = { ...prev, ...updates };
-      localStorage.setItem("reel-gen-settings", JSON.stringify(next));
-      return next;
-    });
-  }, []);
-
-  return [settings, update] as const;
-}
+// ─── Main Settings Page ───────────────────────────────────────────────────────
 
 export default function Settings() {
-  const { data: settings, isLoading } = useGetProviderSettings();
-  const updateMutation = useUpdateProviderSettings();
   const queryClient = useQueryClient();
-  const { toast } = useToast();
-  const [genSettings, updateGenSettings] = useGenerationSettings();
-  const [showImageKey, setShowImageKey] = useState(false);
-  const [showVideoKey, setShowVideoKey] = useState(false);
+  const [showAddOpenRouter, setShowAddOpenRouter] = useState(false);
+  const [showAddCustom, setShowAddCustom] = useState(false);
 
-  const form = useForm<z.infer<typeof settingsSchema>>({
-    resolver: zodResolver(settingsSchema),
-    defaultValues: {
-      providerName: "anthropic",
-      model: "claude-3-5-sonnet-20241022",
-      baseUrl: "",
-      apiKey: "",
-      clearApiKey: false,
-    },
-    values: settings
-      ? {
-          providerName: normalizeProviderName(settings.providerName),
-          model: settings.model,
-          baseUrl: settings.baseUrl ?? "",
-          apiKey: "",
-          clearApiKey: false,
-        }
-      : undefined,
+  const providersQuery = useQuery<{ providers: Provider[] }>({
+    queryKey: ["ai-providers"],
+    queryFn: () => apiFetch("/api/ai-providers"),
   });
 
-  useEffect(() => {
-    if (settings) {
-      form.reset({
-        providerName: normalizeProviderName(settings.providerName),
-        model: settings.model,
-        baseUrl: settings.baseUrl ?? "",
-        apiKey: "",
-        clearApiKey: false,
-      });
-    }
-  }, [settings, form]);
+  const assignmentsQuery = useQuery<{ services: ServiceAssignment[]; availableModels: AvailableModel[] }>({
+    queryKey: ["ai-service-assignments"],
+    queryFn: () => apiFetch("/api/ai-service-assignments"),
+  });
 
-  function onSubmit(data: z.infer<typeof settingsSchema>) {
-    updateMutation.mutate(
-      { data: { ...data, baseUrl: data.baseUrl?.trim() || undefined } },
-      {
-        onSuccess: () => {
-          queryClient.invalidateQueries({ queryKey: getGetProviderSettingsQueryKey() });
-          queryClient.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() });
-          toast({ title: "Settings updated successfully" });
-          form.resetField("apiKey");
-          form.resetField("clearApiKey", { defaultValue: false });
-        },
-        onError: (err) => {
-          toast({ title: "Error updating settings", description: err.message, variant: "destructive" });
-        }
-      }
-    );
+  function refresh() {
+    queryClient.invalidateQueries({ queryKey: ["ai-providers"] });
+    queryClient.invalidateQueries({ queryKey: ["ai-service-assignments"] });
   }
 
-  const isConfigured = settings?.apiKeyConfigured;
-  const selectedProvider = form.watch("providerName") || (settings ? normalizeProviderName(settings.providerName) : "anthropic");
+  const providers = providersQuery.data?.providers ?? [];
+  const openRouterProviders = providers.filter((p) => p.type === "openrouter");
+  const customProviders = providers.filter((p) => p.type === "custom");
+  const services = assignmentsQuery.data?.services ?? [];
+  const availableModels = assignmentsQuery.data?.availableModels ?? [];
+
+  const isLoading = providersQuery.isLoading || assignmentsQuery.isLoading;
+  const isError = providersQuery.isError || assignmentsQuery.isError;
 
   return (
-    <div className="flex flex-col gap-6 h-full max-w-3xl mx-auto w-full animate-in fade-in duration-500">
+    <div className="flex flex-col gap-6 h-full max-w-3xl mx-auto w-full animate-in fade-in duration-500 pb-8">
       <div>
         <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center gap-2">
-          <SettingsIcon className="size-8 text-primary" /> Settings
+          <SettingsIcon className="size-8 text-primary" />
+          إعدادات الذكاء الاصطناعي
         </h1>
-        <p className="text-muted-foreground mt-2">إعدادات حسابك الشخصي ومزودي الذكاء الاصطناعي.</p>
+        <p className="text-muted-foreground mt-2">
+          أضف مزودي الذكاء الاصطناعي وموديلاتهم، ثم اربطها بخدمات الموقع
+        </p>
       </div>
 
-      {/* User Personal API Keys */}
-      <UserApiKeysCard />
+      {isError && (
+        <Alert variant="destructive">
+          <AlertTriangle className="size-4" />
+          <AlertTitle>خطأ في تحميل الإعدادات</AlertTitle>
+          <AlertDescription>
+            تأكد أن لديك صلاحيات مسؤول للوصول لهذه الصفحة
+          </AlertDescription>
+        </Alert>
+      )}
 
       {isLoading ? (
-        <Skeleton className="h-96 w-full" />
+        <div className="space-y-4">
+          <Skeleton className="h-40 w-full" />
+          <Skeleton className="h-40 w-full" />
+          <Skeleton className="h-60 w-full" />
+        </div>
       ) : (
         <>
-          {!isConfigured ? (
-            <Alert variant="destructive" className="bg-destructive/5 border-destructive/20 text-destructive">
-              <AlertTriangle className="size-4" />
-              <AlertTitle>Provider Profile Not Configured</AlertTitle>
-              <AlertDescription>
-                Save a provider profile if you want to track which model and endpoint should be used for AI prompt generation.
-              </AlertDescription>
-            </Alert>
-          ) : (
-            <Alert className="bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-300">
-              <AlertTriangle className="size-4 text-amber-700 dark:text-amber-300" />
-              <AlertTitle>Provider Profile Saved</AlertTitle>
-              <AlertDescription>
-                Your provider choice, model, base URL, and key status are saved for this workspace.
-                {settings?.apiKeyLastFour ? ` (Key ends in ••••${settings.apiKeyLastFour})` : ""}
-              </AlertDescription>
-            </Alert>
-          )}
-
-          <Card className="border-violet-200/60 dark:border-violet-800/30 bg-violet-50/30 dark:bg-violet-950/10">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Sparkles className="size-5 text-violet-600" />
-                إعدادات توليد الصور
-              </CardTitle>
-              <CardDescription>اختر مزود الـ AI ونموذج التوليد للصور في كل Scene</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-5">
-              <Alert className="bg-violet-500/5 border-violet-300/40 text-violet-800 dark:text-violet-300">
-                <Info className="size-4 text-violet-600" />
-                <AlertTitle>نصيحة</AlertTitle>
-                <AlertDescription>
-                  يُنصح باستخدام <strong>FLUX Schnell</strong> عبر fal.ai للسرعة، أو <strong>FLUX Dev</strong> للجودة العالية. احصل على مفتاح API من{" "}
-                  <a href="https://fal.ai/dashboard" target="_blank" rel="noopener noreferrer" className="underline">
-                    fal.ai
-                  </a>{" "}
-                  أو{" "}
-                  <a href="https://api.bfl.ml" target="_blank" rel="noopener noreferrer" className="underline">
-                    BFL
-                  </a>
-                  .
-                </AlertDescription>
-              </Alert>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">مزود التوليد</label>
-                  <Select value={genSettings.imageProvider} onValueChange={(v) => updateGenSettings({ imageProvider: v })}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {IMAGE_PROVIDERS.map((p) => (
-                        <SelectItem key={p.value} value={p.value}>
-                          {p.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {IMAGE_PROVIDERS_HINTS[genSettings.imageProvider] && (
-                    <p className="text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 px-2 py-1.5 rounded-md border border-amber-200/50">
-                      {IMAGE_PROVIDERS_HINTS[genSettings.imageProvider]}
-                    </p>
-                  )}
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">النموذج</label>
-                  <Select value={genSettings.imageModel} onValueChange={(v) => updateGenSettings({ imageModel: v })}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {IMAGE_MODELS.map((m) => (
-                        <SelectItem key={m.value} value={m.value}>
-                          {m.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+          {/* ── OpenRouter Section ── */}
+          <section className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold flex items-center gap-2">
+                  <Zap className="size-5 text-violet-500" />
+                  OpenRouter
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  وصول موحد لمئات من موديلات الذكاء الاصطناعي عبر API واحد
+                </p>
               </div>
+              <Button variant="outline" size="sm" className="h-8 text-xs"
+                onClick={() => setShowAddOpenRouter(true)}
+              >
+                <Plus className="size-3 mr-1" /> إضافة OpenRouter
+              </Button>
+            </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium flex items-center gap-1.5">
-                  <Key className="size-3.5 text-muted-foreground" />
-                  API Key (صور)
-                </label>
-                <div className="flex gap-2">
-                  <Input
-                    type={showImageKey ? "text" : "password"}
-                    placeholder="fal_... أو bfl_..."
-                    value={genSettings.imageApiKey}
-                    onChange={(e) => updateGenSettings({ imageApiKey: e.target.value })}
-                    className="font-mono text-sm"
-                  />
-                  <Button variant="outline" size="sm" onClick={() => setShowImageKey((v) => !v)} className="shrink-0">
-                    {showImageKey ? "إخفاء" : "إظهار"}
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground">يُحفظ محلياً في متصفحك فقط — لا يُرسل للسيرفر</p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-rose-200/60 dark:border-rose-800/30 bg-rose-50/30 dark:bg-rose-950/10">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Film className="size-5 text-rose-600" />
-                إعدادات توليد الفيديو
-              </CardTitle>
-              <CardDescription>اختر نموذج AI لتوليد مقاطع الفيديو من الـ Scene</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-5">
-              <Alert className="bg-rose-500/5 border-rose-300/40 text-rose-800 dark:text-rose-300">
-                <Info className="size-4 text-rose-600" />
-                <AlertTitle>نصيحة</AlertTitle>
-                <AlertDescription>
-                  يُنصح باستخدام <strong>Veo 3</strong> من Google DeepMind للجودة الاحترافية. متاح عبر{" "}
-                  <a href="https://aistudio.google.com" target="_blank" rel="noopener noreferrer" className="underline">
-                    Google AI Studio
-                  </a>
-                  . بديل جيد: <strong>Kling 1.6</strong> عبر fal.ai.
-                </AlertDescription>
-              </Alert>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">مزود التوليد</label>
-                  <Select value={genSettings.videoProvider} onValueChange={(v) => updateGenSettings({ videoProvider: v })}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {VIDEO_PROVIDERS.map((p) => (
-                        <SelectItem key={p.value} value={p.value}>
-                          {p.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {VIDEO_PROVIDERS_HINTS[genSettings.videoProvider] && (
-                    <p className="text-xs text-rose-700 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/30 px-2 py-1.5 rounded-md border border-rose-200/50">
-                      {VIDEO_PROVIDERS_HINTS[genSettings.videoProvider]}
-                    </p>
-                  )}
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">النموذج</label>
-                  <Select value={genSettings.videoModel} onValueChange={(v) => updateGenSettings({ videoModel: v })}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {VIDEO_MODELS.map((m) => (
-                        <SelectItem key={m.value} value={m.value}>
-                          {m.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium flex items-center gap-1.5">
-                  <Key className="size-3.5 text-muted-foreground" />
-                  API Key (فيديو)
-                </label>
-                <div className="flex gap-2">
-                  <Input
-                    type={showVideoKey ? "text" : "password"}
-                    placeholder="AIza... أو fal_..."
-                    value={genSettings.videoApiKey}
-                    onChange={(e) => updateGenSettings({ videoApiKey: e.target.value })}
-                    className="font-mono text-sm"
-                  />
-                  <Button variant="outline" size="sm" onClick={() => setShowVideoKey((v) => !v)} className="shrink-0">
-                    {showVideoKey ? "إخفاء" : "إظهار"}
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground">يُحفظ محلياً في متصفحك فقط — لا يُرسل للسيرفر</p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-border">
-            <CardHeader>
-              <CardTitle>AI Provider Settings</CardTitle>
-              <CardDescription>Select your LLM provider and model for prompt generation.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Form {...form}>
-                <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <FormField
-                      control={form.control}
-                      name="providerName"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Provider</FormLabel>
-                          <Select 
-                            onValueChange={field.onChange} 
-                            value={field.value || (settings ? normalizeProviderName(settings.providerName) : "anthropic")}
-                            disabled={updateMutation.isPending}
-                          >
-                            <FormControl>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select provider" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              <SelectItem value="anthropic">Anthropic</SelectItem>
-                              <SelectItem value="openai">OpenAI</SelectItem>
-                              <SelectItem value="custom">Custom provider</SelectItem>
-                            </SelectContent>
-                          </Select>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name="model"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Model</FormLabel>
-                          {selectedProvider === "custom" ? (
-                            <FormControl>
-                              <Input placeholder="gpt-4o, qwen-vl-max, ..." className="font-mono" {...field} disabled={updateMutation.isPending} />
-                            </FormControl>
-                          ) : (
-                            <Select 
-                              onValueChange={field.onChange} 
-                              value={field.value || settings?.model || "gpt-4o"}
-                              disabled={updateMutation.isPending}
-                            >
-                              <FormControl>
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Select model" />
-                                </SelectTrigger>
-                              </FormControl>
-                              <SelectContent>
-                                {selectedProvider === "anthropic" ? (
-                                  <>
-                                    <SelectItem value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</SelectItem>
-                                    <SelectItem value="claude-3-haiku-20240307">Claude 3 Haiku</SelectItem>
-                                  </>
-                                ) : (
-                                  <>
-                                    <SelectItem value="gpt-4o">GPT-4o</SelectItem>
-                                    <SelectItem value="gpt-4o-mini">GPT-4o Mini</SelectItem>
-                                  </>
-                                )}
-                              </SelectContent>
-                            </Select>
-                          )}
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  </div>
-
-                  {selectedProvider === "custom" && (
-                    <FormField
-                      control={form.control}
-                      name="baseUrl"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Base URL</FormLabel>
-                          <FormControl>
-                            <Input 
-                              placeholder="https://api.example.com/v1" 
-                              className="font-mono"
-                              {...field} 
-                              disabled={updateMutation.isPending}
-                            />
-                          </FormControl>
-                          <FormDescription>
-                            Use an OpenAI-compatible endpoint URL for your custom provider.
-                          </FormDescription>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  )}
-
-                  <FormField
-                    control={form.control}
-                    name="apiKey"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>API Key</FormLabel>
-                        <div className="relative">
-                          <Key className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-                          <FormControl>
-                            <Input 
-                              type="password" 
-                              placeholder={isConfigured ? "••••••••••••••••••••••••" : "sk-..."} 
-                              className="pl-9 font-mono"
-                              {...field} 
-                              disabled={updateMutation.isPending || form.watch("clearApiKey")}
-                            />
-                          </FormControl>
-                        </div>
-                        <FormDescription>
-                          Entering a key records configured status and last-four metadata for this workspace.
-                        </FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  {isConfigured && (
-                    <FormField
-                      control={form.control}
-                      name="clearApiKey"
-                      render={({ field }) => (
-                        <FormItem className="flex flex-row items-center justify-between rounded-lg border border-destructive/20 p-4 bg-destructive/5">
-                          <div className="space-y-0.5">
-                            <FormLabel className="text-base text-destructive">Remove API Key</FormLabel>
-                            <FormDescription>
-                              Clear the saved key metadata for this provider profile.
-                            </FormDescription>
-                          </div>
-                          <FormControl>
-                            <Switch
-                              checked={field.value}
-                              onCheckedChange={field.onChange}
-                              disabled={updateMutation.isPending || !!form.watch("apiKey")}
-                            />
-                          </FormControl>
-                        </FormItem>
-                      )}
-                    />
-                  )}
-
-                  <Button 
-                    type="submit" 
-                    className="w-full" 
-                    disabled={updateMutation.isPending}
-                  >
-                    {updateMutation.isPending ? "Saving Settings..." : "Save Settings"}
-                  </Button>
-                </form>
-              </Form>
-            </CardContent>
-            {settings && (
-              <CardFooter className="bg-muted/30 border-t border-border text-xs text-muted-foreground py-3">
-                Last updated {format(new Date(settings.updatedAt), "PPp")}
-              </CardFooter>
+            {showAddOpenRouter && (
+              <AddProviderForm
+                type="openrouter"
+                onAdded={() => { setShowAddOpenRouter(false); refresh(); }}
+                onCancel={() => setShowAddOpenRouter(false)}
+              />
             )}
-          </Card>
+
+            {openRouterProviders.length === 0 && !showAddOpenRouter ? (
+              <div className="border border-dashed border-border rounded-lg p-6 text-center text-sm text-muted-foreground">
+                <Bot className="size-8 mx-auto mb-2 opacity-40" />
+                <p>لم تتم إضافة أي مزود OpenRouter بعد</p>
+                <p className="text-xs mt-1">
+                  احصل على مفتاحك من{" "}
+                  <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer"
+                    className="text-primary hover:underline"
+                  >
+                    openrouter.ai/keys ↗
+                  </a>
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {openRouterProviders.map((p) => (
+                  <ProviderCard key={p.id} provider={p} onRefresh={refresh} />
+                ))}
+              </div>
+            )}
+          </section>
+
+          <Separator />
+
+          {/* ── Custom AI Section ── */}
+          <section className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold flex items-center gap-2">
+                  <Globe className="size-5 text-blue-500" />
+                  AI مخصص
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  أي endpoint متوافق مع OpenAI API (base URL + API Key)
+                </p>
+              </div>
+              <Button variant="outline" size="sm" className="h-8 text-xs"
+                onClick={() => setShowAddCustom(true)}
+              >
+                <Plus className="size-3 mr-1" /> إضافة مزود مخصص
+              </Button>
+            </div>
+
+            {showAddCustom && (
+              <AddProviderForm
+                type="custom"
+                onAdded={() => { setShowAddCustom(false); refresh(); }}
+                onCancel={() => setShowAddCustom(false)}
+              />
+            )}
+
+            {customProviders.length === 0 && !showAddCustom ? (
+              <div className="border border-dashed border-border rounded-lg p-6 text-center text-sm text-muted-foreground">
+                <Globe className="size-8 mx-auto mb-2 opacity-40" />
+                <p>لم تتم إضافة أي مزود مخصص</p>
+                <p className="text-xs mt-1">
+                  يمكنك إضافة أي خدمة متوافقة مع OpenAI API — Groq، Together AI، Ollama...
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {customProviders.map((p) => (
+                  <ProviderCard key={p.id} provider={p} onRefresh={refresh} />
+                ))}
+              </div>
+            )}
+          </section>
+
+          <Separator />
+
+          {/* ── Service Assignments Section ── */}
+          <section>
+            <ServiceAssignmentsCard
+              services={services}
+              availableModels={availableModels}
+              onSaved={refresh}
+            />
+          </section>
         </>
       )}
     </div>

@@ -14,6 +14,7 @@
     "@distube/ytdl-core": "^4.16.12",
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",
+    "zod": "^3.25.0",
     "archiver": "^7.0.1",
     "cookie-parser": "^1.4.7",
     "cors": "^2",

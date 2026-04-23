@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
+import { getServiceModel } from "../routes/ai-providers";
 
 const execFileAsync = promisify(execFile);
 
@@ -38,6 +39,23 @@ const darijaLines = [
   "Sali b call clear: ila bghiti had natija, bda b had step daba.",
 ];
 
+async function resolveAiConfig(serviceName: string): Promise<{ baseUrl: string; apiKey: string; modelId: string }> {
+  // 1. Try DB-configured provider for this service
+  const dbModel = await getServiceModel(serviceName);
+  if (dbModel) return dbModel;
+
+  // 2. Fall back to Replit AI Integration env vars
+  const baseUrl = process.env["AI_INTEGRATIONS_OPENAI_BASE_URL"];
+  const apiKey = process.env["AI_INTEGRATIONS_OPENAI_API_KEY"];
+  if (baseUrl && apiKey) {
+    return { baseUrl, apiKey, modelId: "gpt-5.2" };
+  }
+
+  throw new Error(
+    `لم يتم تكوين أي مزود ذكاء اصطناعي لخدمة "${serviceName}". يرجى إضافة مزود وتعيينه في صفحة الإعدادات.`
+  );
+}
+
 export async function buildRemixPromptPack(input: {
   originalTitle: string;
   originalSummaryPrompt: string;
@@ -53,12 +71,7 @@ export async function buildRemixPromptPack(input: {
   systemPromptOverride?: string;
   modelOverride?: string | null;
 }): Promise<GeneratedPromptPack> {
-  const baseUrl = process.env["AI_INTEGRATIONS_OPENAI_BASE_URL"];
-  const apiKey = process.env["AI_INTEGRATIONS_OPENAI_API_KEY"];
-
-  if (!baseUrl || !apiKey) {
-    throw new Error("AI access is not configured. Please enable AI access before remixing.");
-  }
+  const { baseUrl, apiKey, modelId: defaultModel } = await resolveAiConfig("remix");
 
   const originalScenesText = input.originalScenes
     .map(
@@ -74,7 +87,7 @@ export async function buildRemixPromptPack(input: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: input.modelOverride?.trim() || "gpt-5.2",
+      model: input.modelOverride?.trim() || defaultModel,
       response_format: { type: "json_object" },
       messages: [
         {
@@ -326,12 +339,7 @@ export async function buildAIVideoPromptPack(input: {
   systemPromptOverride?: string;
   modelOverride?: string | null;
 }): Promise<GeneratedPromptPack> {
-  const baseUrl = process.env["AI_INTEGRATIONS_OPENAI_BASE_URL"];
-  const apiKey = process.env["AI_INTEGRATIONS_OPENAI_API_KEY"];
-
-  if (!baseUrl || !apiKey) {
-    throw new Error("Real video analysis is not configured. Please enable AI access before analyzing videos.");
-  }
+  const { baseUrl, apiKey, modelId: defaultModel } = await resolveAiConfig("video-analysis");
 
   const frameInputs = buildFrameInputs(input.videoFrames, 32, "high");
 
@@ -348,7 +356,7 @@ export async function buildAIVideoPromptPack(input: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: input.modelOverride?.trim() || "gpt-5.2",
+        model: input.modelOverride?.trim() || defaultModel,
         response_format: { type: "json_object" },
         messages: [
           {
@@ -573,12 +581,7 @@ async function buildAIUrlTextOnlyPromptPack(input: {
   systemPromptOverride?: string;
   modelOverride?: string | null;
 }): Promise<GeneratedPromptPack> {
-  const baseUrl = process.env["AI_INTEGRATIONS_OPENAI_BASE_URL"];
-  const apiKey = process.env["AI_INTEGRATIONS_OPENAI_API_KEY"];
-
-  if (!baseUrl || !apiKey) {
-    throw new Error("Real AI analysis is not configured. Please enable AI access before analyzing videos.");
-  }
+  const { baseUrl, apiKey, modelId: defaultModel } = await resolveAiConfig("video-analysis");
 
   const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
@@ -587,7 +590,7 @@ async function buildAIUrlTextOnlyPromptPack(input: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: input.modelOverride?.trim() || "gpt-5.2",
+      model: input.modelOverride?.trim() || defaultModel,
       response_format: { type: "json_object" },
       messages: [
         {
