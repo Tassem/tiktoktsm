@@ -6,7 +6,7 @@ import {
   aiServiceAssignmentsTable,
 } from "@workspace/db";
 import { eq, asc, and } from "drizzle-orm";
-import { requireAuth, requireAdmin } from "../middlewares/auth";
+import { requireAuth } from "../middlewares/auth";
 import { z } from "zod";
 
 const router = Router();
@@ -38,7 +38,7 @@ const assignmentSchema = z.object({
 // ─── Providers CRUD (Admin only) ─────────────────────────────────────────────
 
 // GET /api/ai-providers - list all providers with their models
-router.get("/ai-providers", requireAuth, requireAdmin, async (_req, res): Promise<void> => {
+router.get("/ai-providers", requireAuth, async (_req, res): Promise<void> => {
   try {
     const providers = await db
       .select()
@@ -63,7 +63,7 @@ router.get("/ai-providers", requireAuth, requireAdmin, async (_req, res): Promis
 });
 
 // POST /api/ai-providers - create provider
-router.post("/ai-providers", requireAuth, requireAdmin, async (req, res): Promise<void> => {
+router.post("/ai-providers", requireAuth, async (req, res): Promise<void> => {
   const parsed = providerSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" });
@@ -81,7 +81,7 @@ router.post("/ai-providers", requireAuth, requireAdmin, async (req, res): Promis
 });
 
 // PUT /api/ai-providers/:id - update provider
-router.put("/ai-providers/:id", requireAuth, requireAdmin, async (req, res): Promise<void> => {
+router.put("/ai-providers/:id", requireAuth, async (req, res): Promise<void> => {
   const id = parseInt(req.params.id);
   if (isNaN(id)) { res.status(400).json({ error: "معرّف غير صالح" }); return; }
 
@@ -111,7 +111,7 @@ router.put("/ai-providers/:id", requireAuth, requireAdmin, async (req, res): Pro
 });
 
 // DELETE /api/ai-providers/:id - delete provider (cascades models)
-router.delete("/ai-providers/:id", requireAuth, requireAdmin, async (req, res): Promise<void> => {
+router.delete("/ai-providers/:id", requireAuth, async (req, res): Promise<void> => {
   const id = parseInt(req.params.id);
   if (isNaN(id)) { res.status(400).json({ error: "معرّف غير صالح" }); return; }
   try {
@@ -125,7 +125,7 @@ router.delete("/ai-providers/:id", requireAuth, requireAdmin, async (req, res): 
 // ─── Models CRUD ─────────────────────────────────────────────────────────────
 
 // POST /api/ai-providers/:id/models - add model to provider
-router.post("/ai-providers/:id/models", requireAuth, requireAdmin, async (req, res): Promise<void> => {
+router.post("/ai-providers/:id/models", requireAuth, async (req, res): Promise<void> => {
   const providerId = parseInt(req.params.id);
   if (isNaN(providerId)) { res.status(400).json({ error: "معرّف غير صالح" }); return; }
 
@@ -147,7 +147,7 @@ router.post("/ai-providers/:id/models", requireAuth, requireAdmin, async (req, r
 });
 
 // PUT /api/ai-providers/models/:modelId - update model
-router.put("/ai-providers/models/:modelId", requireAuth, requireAdmin, async (req, res): Promise<void> => {
+router.put("/ai-providers/models/:modelId", requireAuth, async (req, res): Promise<void> => {
   const modelId = parseInt(req.params.modelId);
   if (isNaN(modelId)) { res.status(400).json({ error: "معرّف غير صالح" }); return; }
 
@@ -171,7 +171,7 @@ router.put("/ai-providers/models/:modelId", requireAuth, requireAdmin, async (re
 });
 
 // DELETE /api/ai-providers/models/:modelId - delete model
-router.delete("/ai-providers/models/:modelId", requireAuth, requireAdmin, async (req, res): Promise<void> => {
+router.delete("/ai-providers/models/:modelId", requireAuth, async (req, res): Promise<void> => {
   const modelId = parseInt(req.params.modelId);
   if (isNaN(modelId)) { res.status(400).json({ error: "معرّف غير صالح" }); return; }
   try {
@@ -192,7 +192,7 @@ const SERVICES = [
 ];
 
 // GET /api/ai-service-assignments - get all service assignments with model info
-router.get("/ai-service-assignments", requireAuth, requireAdmin, async (_req, res): Promise<void> => {
+router.get("/ai-service-assignments", requireAuth, async (_req, res): Promise<void> => {
   try {
     const assignments = await db.select().from(aiServiceAssignmentsTable);
     const models = await db
@@ -228,7 +228,7 @@ router.get("/ai-service-assignments", requireAuth, requireAdmin, async (_req, re
 });
 
 // PUT /api/ai-service-assignments - bulk update assignments
-router.put("/ai-service-assignments", requireAuth, requireAdmin, async (req, res): Promise<void> => {
+router.put("/ai-service-assignments", requireAuth, async (req, res): Promise<void> => {
   const parsed = z.array(assignmentSchema).safeParse(req.body?.assignments);
   if (!parsed.success) {
     res.status(400).json({ error: "بيانات غير صالحة" });
