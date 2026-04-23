@@ -76,12 +76,14 @@ export default function Studio() {
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const realAnalysisEnabled = settings?.realAnalysisEnabled === true;
+  const demoMode = !realAnalysisEnabled;
+
   const [mode, setMode] = useState<IntakeMode>("upload");
   const [nicheId, setNicheId] = useState<number>(0);
   const [reelUrl, setReelUrl] = useState("");
   const [reelNotes, setReelNotes] = useState("");
   const [concept, setConcept] = useState("Cinematic reel prompt pack");
-  const [demoMode] = useState(true);
   const [targetNicheId, setTargetNicheId] = useState<number>(0);
   const [search, setSearch] = useState("");
   const [selectedFileName, setSelectedFileName] = useState("");
@@ -125,7 +127,6 @@ export default function Studio() {
     };
   }, [videoPreviewUrl]);
 
-  const realAnalysisEnabled = settings?.realAnalysisEnabled === true;
   const promptText = activePack ? formatPromptPack(activePack) : "";
   const isWorking =
     createAnalysisMutation.isPending ||

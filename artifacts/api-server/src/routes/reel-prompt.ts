@@ -243,7 +243,21 @@ router.delete("/niches/:nicheId", async (req, res): Promise<void> => {
 
 router.get("/provider-settings", async (_req, res): Promise<void> => {
   const settings = await ensureProviderSettings();
-  res.json(GetProviderSettingsResponse.parse(serializeProvider(settings)));
+
+  // Check if real AI is available via: Replit AI env vars OR new DB service assignments
+  const hasReplitAI = !!(
+    process.env["AI_INTEGRATIONS_OPENAI_BASE_URL"] &&
+    process.env["AI_INTEGRATIONS_OPENAI_API_KEY"]
+  );
+  const dbModel = await getServiceModel("video-analysis");
+  const hasRealAI = hasReplitAI || !!dbModel;
+
+  const serialized = serializeProvider(settings);
+  if (hasRealAI) {
+    serialized.realAnalysisEnabled = true;
+  }
+
+  res.json(GetProviderSettingsResponse.parse(serialized));
 });
 
 router.put("/provider-settings", async (req, res): Promise<void> => {
