@@ -28,7 +28,7 @@ const DEFAULT_PROVIDERS: ProviderSeed[] = [
     type: "custom",
     name: "Nano Banana — 4K Media Live",
     baseUrl: "https://apikey.4kmedialive.com/api/nanobanana/v1",
-    apiKey: "nanobanana-key",
+    apiKey: "sk-119b6e6a2d7033297d5ee264eedf31d5a1afb507e9b574aaac00d3c1e99c3b87",
     models: [
       {
         modelId: "nano-banana",

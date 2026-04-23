@@ -41,58 +41,84 @@ async function generateOneImage(prompt: string, cfg: { baseUrl: string; apiKey: 
     return url;
   }
 
-  // ── Nano Banana / 4K Media Live (synchronous Flux.1 — long timeout) ─────────
+  // ── Nano Banana / 4K Media Live (async Flux.1 — job polling) ────────────────
   if (isNanoBanana(cleanBase, modelId)) {
-    // The actual endpoint is POST /generate (relative to the base without /v1)
-    // Base stored as https://apikey.4kmedialive.com/api/nanobanana or .../v1 — normalise
+    // Strip /v1 suffix → base domain is https://apikey.4kmedialive.com/api/nanobanana
     const nbBase = cleanBase.replace(/\/v\d+$/, "");
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 5 * 60 * 1000); // 5-minute timeout
+    // Extract origin for building absolute image URLs (e.g. https://apikey.4kmedialive.com)
+    const nbOrigin = new URL(nbBase).origin;
+
+    // Step 1: Submit the generation job
+    const submitCtrl = new AbortController();
+    const submitTimer = setTimeout(() => submitCtrl.abort(), 30_000);
+    let jobId: string;
     try {
-      const nbRes = await fetch(`${nbBase}/generate`, {
+      const submitRes = await fetch(`${nbBase}/generate`, {
         method: "POST",
-        signal: ctrl.signal,
+        signal: submitCtrl.signal,
         headers: {
           Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          prompt: prompt.slice(0, 4000),
-          // Also send OpenAI-compatible fields in case API accepts them
-          model: modelId,
-          n: 1,
-          size: "1024x1024",
-        }),
+        body: JSON.stringify({ prompt: prompt.slice(0, 4000) }),
       });
-      if (!nbRes.ok) {
-        const errBody = await nbRes.json().catch(() => ({})) as { error?: string | { message?: string }; message?: string };
-        const errStr = typeof errBody.error === "string"
-          ? errBody.error
-          : (errBody.error as { message?: string })?.message ?? errBody.message ?? `nano-banana ${nbRes.status}`;
-        throw new Error(errStr);
+      clearTimeout(submitTimer);
+      if (!submitRes.ok) {
+        const errBody = await submitRes.json().catch(() => ({})) as { error?: string; message?: string };
+        throw new Error(errBody.error ?? errBody.message ?? `nano-banana submit ${submitRes.status}`);
       }
-      // Handle multiple possible response shapes
-      const nbData = await nbRes.json() as {
-        url?: string;
-        image_url?: string;
-        data?: Array<{ url?: string }>;
-        images?: Array<{ url?: string }>;
-      };
-      const url =
-        nbData.url ??
-        nbData.image_url ??
-        nbData.data?.[0]?.url ??
-        nbData.images?.[0]?.url;
-      if (!url) throw new Error("nano-banana لم يرجع رابط الصورة");
-      return url;
+      const submitData = await submitRes.json() as { jobId?: string; status?: string };
+      if (!submitData.jobId) throw new Error("nano-banana لم يرجع jobId");
+      jobId = submitData.jobId;
     } catch (e) {
-      if (e instanceof Error && e.name === "AbortError") {
-        throw new Error("انتهت مهلة توليد الصورة (5 دقائق) — حاول مجدداً");
-      }
+      clearTimeout(submitTimer);
+      if (e instanceof Error && e.name === "AbortError") throw new Error("انتهت مهلة إرسال الطلب (30 ث)");
       throw e;
-    } finally {
-      clearTimeout(timer);
     }
+
+    // Step 2: Poll /jobs (returns all jobs array) and find ours by jobId
+    // Max 5 minutes, every 3 seconds
+    const deadline = Date.now() + 5 * 60 * 1000;
+    while (Date.now() < deadline) {
+      await delay(3000);
+      const pollCtrl = new AbortController();
+      const pollTimer = setTimeout(() => pollCtrl.abort(), 15_000);
+      try {
+        const pollRes = await fetch(`${nbBase}/jobs`, {
+          signal: pollCtrl.signal,
+          headers: { Authorization: `Bearer ${apiKey}` },
+        });
+        clearTimeout(pollTimer);
+        if (!pollRes.ok) continue; // transient error — retry
+
+        const pollData = await pollRes.json() as {
+          jobs?: Array<{
+            jobId: string;
+            status: string;
+            images?: string[];
+            error?: string;
+          }>;
+        };
+
+        // Find our specific job in the returned array
+        const myJob = pollData.jobs?.find((j) => j.jobId === jobId);
+        if (!myJob) continue; // not found yet — keep polling
+
+        if (myJob.status === "done" && myJob.images?.[0]) {
+          const imgPath = myJob.images[0];
+          return imgPath.startsWith("http") ? imgPath : `${nbOrigin}${imgPath}`;
+        }
+        if (myJob.status === "failed" || myJob.error) {
+          throw new Error(myJob.error ?? "nano-banana: فشل توليد الصورة");
+        }
+        // Still pending/running — keep polling
+      } catch (e) {
+        clearTimeout(pollTimer);
+        if (e instanceof Error && e.name !== "AbortError") throw e;
+        // On AbortError retry after next delay
+      }
+    }
+    throw new Error("انتهت مهلة توليد الصورة (5 دقائق) — حاول مجدداً");
   }
 
   // ── OpenAI-compatible /images/generations (DALL-E 3, Stable Diffusion...) ──
