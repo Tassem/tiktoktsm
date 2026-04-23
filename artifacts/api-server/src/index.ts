@@ -1,6 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { syncDefaultSystemPrompts } from "./lib/ai-system-prompts";
+import { seedDefaultProviders } from "./lib/seed-providers";
 
 const rawPort = process.env["PORT"];
 
@@ -27,4 +28,8 @@ app.listen(port, (err) => {
   syncDefaultSystemPrompts()
     .then(() => logger.info("System prompts synced to latest defaults"))
     .catch((e) => logger.warn({ err: e }, "Failed to sync system prompt defaults"));
+
+  seedDefaultProviders()
+    .then(() => logger.info("Default AI providers seeded"))
+    .catch((e) => logger.warn({ err: e }, "Failed to seed default AI providers"));
 });

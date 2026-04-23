@@ -7,6 +7,11 @@ function delay(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// Detect nano-banana / 4kmedialive provider by base URL
+function isNanoBanana(baseUrl: string, modelId: string): boolean {
+  return baseUrl.includes("4kmedialive.com") || modelId === "nano-banana";
+}
+
 async function generateOneImage(prompt: string, cfg: { baseUrl: string; apiKey: string; modelId: string }): Promise<string> {
   const { baseUrl, apiKey, modelId } = cfg;
   const cleanBase = baseUrl.replace(/\/$/, "");
@@ -34,6 +39,45 @@ async function generateOneImage(prompt: string, cfg: { baseUrl: string; apiKey: 
     const url = falData.images?.[0]?.url;
     if (!url) throw new Error("fal.ai لم يرجع رابط الصورة");
     return url;
+  }
+
+  // ── Nano Banana / 4K Media Live (synchronous Flux.1 — long timeout) ─────────
+  if (isNanoBanana(cleanBase, modelId)) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 5 * 60 * 1000); // 5-minute timeout
+    try {
+      const nbRes = await fetch(`${cleanBase}/images/generations`, {
+        method: "POST",
+        signal: ctrl.signal,
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: modelId,
+          prompt: prompt.slice(0, 4000),
+          n: 1,
+          size: "1024x1024",
+          response_format: "url",
+        }),
+      });
+      if (!nbRes.ok) {
+        const err = await nbRes.json().catch(() => ({})) as { error?: { message?: string }; message?: string };
+        const msg = (err as { error?: { message?: string } }).error?.message ?? (err as { message?: string }).message ?? `nano-banana ${nbRes.status}`;
+        throw new Error(msg);
+      }
+      const nbData = await nbRes.json() as { data?: Array<{ url?: string }> };
+      const url = nbData.data?.[0]?.url;
+      if (!url) throw new Error("nano-banana لم يرجع رابط الصورة");
+      return url;
+    } catch (e) {
+      if (e instanceof Error && e.name === "AbortError") {
+        throw new Error("انتهت مهلة توليد الصورة (5 دقائق) — حاول مجدداً");
+      }
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   // ── OpenAI-compatible /images/generations (DALL-E 3, Stable Diffusion...) ──
