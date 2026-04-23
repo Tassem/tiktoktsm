@@ -12,16 +12,45 @@ import { format } from "date-fns";
 
 const DEFAULT_MODEL_SENTINEL = "__default__";
 
-const AVAILABLE_MODELS = [
-  { value: DEFAULT_MODEL_SENTINEL, label: "الافتراضي (gpt-5.2)" },
+const FALLBACK_MODELS = [
   { value: "gpt-5.2", label: "GPT-5.2" },
   { value: "gpt-4.1", label: "GPT-4.1" },
   { value: "gpt-4o", label: "GPT-4o" },
   { value: "gpt-4o-mini", label: "GPT-4o Mini" },
-  { value: "gpt-4-turbo", label: "GPT-4 Turbo" },
   { value: "claude-3-5-sonnet-20241022", label: "Claude 3.5 Sonnet" },
   { value: "claude-3-haiku-20240307", label: "Claude 3 Haiku" },
 ];
+
+type ProviderModel = { modelId: string; displayName: string | null };
+type Provider = { id: number; name: string; type: string; models?: ProviderModel[] };
+
+function useConfiguredModels() {
+  return useQuery<{ models: Array<{ value: string; label: string; group: string }> }>({
+    queryKey: ["ai-provider-models-flat"],
+    queryFn: async () => {
+      const res = await fetch("/api/ai-providers");
+      if (!res.ok) return { models: FALLBACK_MODELS.map((m) => ({ ...m, group: "النماذج المعتمدة" })) };
+      const providers: Provider[] = await res.json();
+      const models: Array<{ value: string; label: string; group: string }> = [];
+      for (const p of providers) {
+        if (!p.models?.length) continue;
+        for (const m of p.models) {
+          models.push({
+            value: m.modelId,
+            label: m.displayName ? `${m.displayName} (${m.modelId})` : m.modelId,
+            group: p.name,
+          });
+        }
+      }
+      if (models.length === 0) {
+        return { models: FALLBACK_MODELS.map((m) => ({ ...m, group: "النماذج الافتراضية" })) };
+      }
+      return { models };
+    },
+    staleTime: 30_000,
+    retry: false,
+  });
+}
 
 type AiSystem = {
   systemKey: string;
@@ -44,7 +73,7 @@ const SYSTEM_COLORS: Record<string, string> = {
   "story-summary": "bg-amber-50 border-amber-200 text-amber-700",
 };
 
-function AiSystemCard({ system }: { system: AiSystem }) {
+function AiSystemCard({ system, availableModels }: { system: AiSystem; availableModels: Array<{ value: string; label: string; group: string }> }) {
   const [expanded, setExpanded] = useState(false);
   const [editedPrompt, setEditedPrompt] = useState(system.systemPrompt);
   const [selectedModel, setSelectedModel] = useState(system.modelOverride ?? DEFAULT_MODEL_SENTINEL);
@@ -108,7 +137,9 @@ function AiSystemCard({ system }: { system: AiSystem }) {
     setIsDirty(editedPrompt !== system.systemPrompt || value !== (system.modelOverride ?? DEFAULT_MODEL_SENTINEL));
   }
 
-  const activeModelLabel = AVAILABLE_MODELS.find((m) => m.value === selectedModel)?.label ?? (selectedModel || "الافتراضي (gpt-5.2)");
+  const activeModelLabel = selectedModel === DEFAULT_MODEL_SENTINEL
+    ? "الافتراضي"
+    : (availableModels.find((m) => m.value === selectedModel)?.label ?? (selectedModel || "الافتراضي"));
 
   return (
     <Card className="overflow-hidden">
@@ -154,10 +185,13 @@ function AiSystemCard({ system }: { system: AiSystem }) {
             </Label>
             <Select value={selectedModel} onValueChange={handleModelChange}>
               <SelectTrigger className="h-8 text-xs bg-background">
-                <SelectValue placeholder="الافتراضي (gpt-5.2)" />
+                <SelectValue placeholder="الافتراضي" />
               </SelectTrigger>
               <SelectContent>
-                {AVAILABLE_MODELS.map((m) => (
+                <SelectItem value={DEFAULT_MODEL_SENTINEL} className="text-xs">
+                  الافتراضي (حسب الإعدادات)
+                </SelectItem>
+                {availableModels.map((m) => (
                   <SelectItem key={m.value} value={m.value} className="text-xs">
                     {m.label}
                   </SelectItem>
@@ -236,6 +270,9 @@ export default function AiSystems() {
     staleTime: 1000 * 60 * 5,
   });
 
+  const { data: modelsData } = useConfiguredModels();
+  const availableModels = modelsData?.models ?? FALLBACK_MODELS.map((m) => ({ ...m, group: "الافتراضية" }));
+
   return (
     <div className="flex flex-col gap-6 animate-in fade-in duration-500 max-w-4xl mx-auto w-full pb-16">
       <div>
@@ -270,7 +307,7 @@ export default function AiSystems() {
       {systems && (
         <div className="space-y-4">
           {systems.map((system) => (
-            <AiSystemCard key={system.systemKey} system={system} />
+            <AiSystemCard key={system.systemKey} system={system} availableModels={availableModels} />
           ))}
         </div>
       )}
