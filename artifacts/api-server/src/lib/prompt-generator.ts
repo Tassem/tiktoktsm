@@ -357,7 +357,10 @@ export async function buildAIVideoPromptPack(input: {
       },
       body: JSON.stringify({
         model: input.modelOverride?.trim() || defaultModel,
-        response_format: { type: "json_object" },
+        // Do NOT force response_format: json_object here — the custom system prompt (v2)
+        // uses a two-stage output: Stage 1 markdown analysis + "---JSON-OUTPUT-BELOW---" + Stage 2 JSON.
+        // Forcing json_object would prevent Stage 1 from being written, causing the AI to
+        // cram Stage 1 analysis text into JSON fields (summaryPrompt / imagePrompt duplication bug).
         messages: [
           {
             role: "system",
@@ -758,7 +761,15 @@ function isImageProcessingServerError(errorText: string) {
 }
 
 function parseJsonObject(value: string) {
-  const trimmed = value.trim();
+  let trimmed = value.trim();
+
+  // Handle two-stage system prompt output: Stage 1 (markdown) + separator + Stage 2 (JSON)
+  // The separator is "---JSON-OUTPUT-BELOW---" (may have surrounding whitespace/dashes)
+  const separatorMatch = trimmed.match(/---+\s*JSON[- _]OUTPUT[- _]BELOW\s*---+/i);
+  if (separatorMatch && separatorMatch.index !== undefined) {
+    trimmed = trimmed.slice(separatorMatch.index + separatorMatch[0].length).trim();
+  }
+
   const unfenced = trimmed
     .replace(/^```json\s*/i, "")
     .replace(/^```\s*/i, "")
