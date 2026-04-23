@@ -43,10 +43,13 @@ async function generateOneImage(prompt: string, cfg: { baseUrl: string; apiKey: 
 
   // ── Nano Banana / 4K Media Live (synchronous Flux.1 — long timeout) ─────────
   if (isNanoBanana(cleanBase, modelId)) {
+    // The actual endpoint is POST /generate (relative to the base without /v1)
+    // Base stored as https://apikey.4kmedialive.com/api/nanobanana or .../v1 — normalise
+    const nbBase = cleanBase.replace(/\/v\d+$/, "");
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 5 * 60 * 1000); // 5-minute timeout
     try {
-      const nbRes = await fetch(`${cleanBase}/images/generations`, {
+      const nbRes = await fetch(`${nbBase}/generate`, {
         method: "POST",
         signal: ctrl.signal,
         headers: {
@@ -54,20 +57,32 @@ async function generateOneImage(prompt: string, cfg: { baseUrl: string; apiKey: 
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: modelId,
           prompt: prompt.slice(0, 4000),
+          // Also send OpenAI-compatible fields in case API accepts them
+          model: modelId,
           n: 1,
           size: "1024x1024",
-          response_format: "url",
         }),
       });
       if (!nbRes.ok) {
-        const err = await nbRes.json().catch(() => ({})) as { error?: { message?: string }; message?: string };
-        const msg = (err as { error?: { message?: string } }).error?.message ?? (err as { message?: string }).message ?? `nano-banana ${nbRes.status}`;
-        throw new Error(msg);
+        const errBody = await nbRes.json().catch(() => ({})) as { error?: string | { message?: string }; message?: string };
+        const errStr = typeof errBody.error === "string"
+          ? errBody.error
+          : (errBody.error as { message?: string })?.message ?? errBody.message ?? `nano-banana ${nbRes.status}`;
+        throw new Error(errStr);
       }
-      const nbData = await nbRes.json() as { data?: Array<{ url?: string }> };
-      const url = nbData.data?.[0]?.url;
+      // Handle multiple possible response shapes
+      const nbData = await nbRes.json() as {
+        url?: string;
+        image_url?: string;
+        data?: Array<{ url?: string }>;
+        images?: Array<{ url?: string }>;
+      };
+      const url =
+        nbData.url ??
+        nbData.image_url ??
+        nbData.data?.[0]?.url ??
+        nbData.images?.[0]?.url;
       if (!url) throw new Error("nano-banana لم يرجع رابط الصورة");
       return url;
     } catch (e) {
