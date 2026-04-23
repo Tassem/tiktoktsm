@@ -260,6 +260,88 @@ router.put("/ai-service-assignments", requireAuth, async (req, res): Promise<voi
   }
 });
 
+// ─── Test Provider Connection ─────────────────────────────────────────────────
+
+router.post("/ai-providers/:id/test", requireAuth, async (req, res): Promise<void> => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) { res.status(400).json({ error: "معرّف غير صالح" }); return; }
+
+  try {
+    const [provider] = await db
+      .select()
+      .from(aiProvidersTable)
+      .where(eq(aiProvidersTable.id, id));
+
+    if (!provider) { res.status(404).json({ error: "المزود غير موجود" }); return; }
+
+    const cleanBase = provider.baseUrl.replace(/\/$/, "");
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 10_000);
+
+    try {
+      // Try GET /models (standard OpenAI endpoint)
+      const testRes = await fetch(`${cleanBase}/models`, {
+        signal: ctrl.signal,
+        headers: {
+          Authorization: `Bearer ${provider.apiKey}`,
+          "Content-Type": "application/json",
+        },
+      });
+      clearTimeout(timer);
+
+      // Any HTTP response (even 401/403/404) means the server is reachable
+      const reachable = testRes.status < 500 || testRes.status === 404;
+      const authed = testRes.status === 200;
+
+      if (authed) {
+        const data = await testRes.json().catch(() => null) as { data?: unknown[] } | null;
+        const modelCount = Array.isArray(data?.data) ? data.data.length : null;
+        res.json({
+          ok: true,
+          status: "متصل ✅",
+          detail: modelCount != null
+            ? `الخادم يعمل — ${modelCount} موديل متاح`
+            : "الخادم يعمل والمفتاح صحيح",
+          httpStatus: testRes.status,
+        });
+      } else if (reachable) {
+        res.json({
+          ok: true,
+          status: "الخادم متاح ⚠️",
+          detail: testRes.status === 401
+            ? "الخادم يعمل لكن المفتاح مرفوض (401)"
+            : testRes.status === 403
+            ? "الخادم يعمل لكن الوصول محظور (403)"
+            : testRes.status === 404
+            ? "الخادم يعمل — endpoint /models غير موجود (عادي لبعض المزودين)"
+            : `الخادم يعمل — كود HTTP: ${testRes.status}`,
+          httpStatus: testRes.status,
+        });
+      } else {
+        res.json({
+          ok: false,
+          status: "خطأ في الخادم ❌",
+          detail: `الخادم أرجع خطأ: ${testRes.status}`,
+          httpStatus: testRes.status,
+        });
+      }
+    } catch (fetchErr) {
+      clearTimeout(timer);
+      const isTimeout = fetchErr instanceof Error && fetchErr.name === "AbortError";
+      res.json({
+        ok: false,
+        status: isTimeout ? "انتهت المهلة ❌" : "تعذّر الاتصال ❌",
+        detail: isTimeout
+          ? "لم يستجب الخادم خلال 10 ثوانٍ"
+          : `خطأ في الاتصال: ${fetchErr instanceof Error ? fetchErr.message : "unknown"}`,
+        httpStatus: null,
+      });
+    }
+  } catch {
+    res.status(500).json({ error: "فشل اختبار الاتصال" });
+  }
+});
+
 // ─── Public: get resolved model for a service (used by prompt generator) ─────
 
 export async function getServiceModel(serviceName: string): Promise<{

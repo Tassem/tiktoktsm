@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useUser } from "@clerk/react";
+import { useUser, useAuth } from "@clerk/react";
 import {
   Settings as SettingsIcon,
   Plus,
@@ -19,6 +19,8 @@ import {
   Bot,
   ShieldCheck,
   Lock,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -81,13 +83,32 @@ type AvailableModel = {
 
 // ─── API helpers ─────────────────────────────────────────────────────────────
 
+// Module-level token cache — updated by useSetupAuth hook inside Settings component
+let _getToken: (() => Promise<string | null>) | null = null;
+
 async function apiFetch(url: string, opts?: RequestInit) {
-  const res = await fetch(url, { credentials: "include", ...opts });
+  const token = _getToken ? await _getToken() : null;
+  const res = await fetch(url, {
+    credentials: "include",
+    ...opts,
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(opts?.headers ?? {}),
+    },
+  });
   if (!res.ok) {
     const err = await res.json().catch(() => ({})) as { error?: string };
     throw new Error(err.error ?? `HTTP ${res.status}`);
   }
   return res.json();
+}
+
+function useSetupAuth() {
+  const { getToken } = useAuth();
+  useEffect(() => {
+    _getToken = getToken;
+    return () => { _getToken = null; };
+  }, [getToken]);
 }
 
 // Popular OpenRouter models to suggest
@@ -379,6 +400,8 @@ function ModelRow({
 
 // ─── Provider Card ────────────────────────────────────────────────────────────
 
+type TestResult = { ok: boolean; status: string; detail: string; httpStatus: number | null } | null;
+
 function ProviderCard({ provider, onRefresh }: { provider: Provider; onRefresh: () => void }) {
   const { toast } = useToast();
   const [expanded, setExpanded] = useState(true);
@@ -388,6 +411,16 @@ function ProviderCard({ provider, onRefresh }: { provider: Provider; onRefresh: 
   const [editingInfo, setEditingInfo] = useState(false);
   const [editName, setEditName] = useState(provider.name);
   const [editBaseUrl, setEditBaseUrl] = useState(provider.baseUrl);
+  const [testResult, setTestResult] = useState<TestResult>(null);
+
+  const testConnection = useMutation({
+    mutationFn: () =>
+      apiFetch(`/api/ai-providers/${provider.id}/test`, { method: "POST" }) as Promise<TestResult>,
+    onSuccess: (data) => {
+      setTestResult(data);
+    },
+    onError: (err) => toast({ title: "خطأ في الاختبار", description: err.message, variant: "destructive" }),
+  });
 
   const updateProvider = useMutation({
     mutationFn: (data: Record<string, unknown>) =>
@@ -503,6 +536,23 @@ function ProviderCard({ provider, onRefresh }: { provider: Provider; onRefresh: 
                   onCheckedChange={(v) => updateProvider.mutate({ isActive: v })}
                   className="scale-75"
                 />
+                {provider.type === "custom" && (
+                  <Button
+                    variant="ghost" size="sm" className="h-7 w-7 p-0"
+                    title="اختبار الاتصال"
+                    onClick={() => { setTestResult(null); testConnection.mutate(); }}
+                    disabled={testConnection.isPending}
+                  >
+                    {testConnection.isPending
+                      ? <div className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                      : testResult
+                        ? testResult.ok
+                          ? <Wifi className="size-3.5 text-green-500" />
+                          : <WifiOff className="size-3.5 text-destructive" />
+                        : <Wifi className="size-3.5" />
+                    }
+                  </Button>
+                )}
                 <Button
                   variant="ghost" size="sm" className="h-7 w-7 p-0"
                   title="تعديل"
@@ -526,6 +576,17 @@ function ProviderCard({ provider, onRefresh }: { provider: Provider; onRefresh: 
               <Globe className="size-3 shrink-0" />
               <span className="font-mono truncate">{provider.baseUrl}</span>
             </div>
+
+            {testResult && (
+              <div className={`mt-2 px-3 py-2 rounded-md text-xs border ${
+                testResult.ok
+                  ? "bg-green-500/10 border-green-500/30 text-green-700 dark:text-green-400"
+                  : "bg-destructive/10 border-destructive/30 text-destructive"
+              }`}>
+                <div className="font-semibold">{testResult.status}</div>
+                <div className="mt-0.5 opacity-80">{testResult.detail}</div>
+              </div>
+            )}
 
             <div className="flex items-center gap-2 text-xs mt-1">
               {editingKey ? (
@@ -826,6 +887,7 @@ function ServiceAssignmentsCard({
 // ─── Main Settings Page ───────────────────────────────────────────────────────
 
 export default function Settings() {
+  useSetupAuth();
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { user, isLoaded: userLoaded } = useUser();
