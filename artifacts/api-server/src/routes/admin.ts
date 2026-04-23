@@ -273,6 +273,42 @@ router.post("/admin/users/:id/impersonate", requireAdmin, async (req, res) => {
   }
 });
 
+// ─── Bootstrap: first user becomes admin ──────────────────────────────────────
+
+router.post("/admin/bootstrap", requireAuth, async (req, res) => {
+  try {
+    const authCtx = getAuth(req);
+    const userId = authCtx?.userId;
+    if (!userId) { res.status(401).json({ error: "غير مسجّل الدخول" }); return; }
+
+    // Check if any user already has admin role
+    const listRes = await fetch(`${CLERK_BASE}/users?limit=100`, { headers: clerkHeaders() });
+    if (!listRes.ok) { res.status(502).json({ error: "فشل الاتصال بـ Clerk" }); return; }
+    const users = await listRes.json() as Array<{ id: string; public_metadata?: Record<string, unknown> }>;
+    const existingAdmins = users.filter((u) => u.public_metadata?.role === "admin");
+
+    if (existingAdmins.length > 0 && !existingAdmins.some((u) => u.id === userId)) {
+      res.status(403).json({ error: "يوجد مشرف بالفعل. فقط المشرف الحالي يمكنه ترقية مستخدمين آخرين." });
+      return;
+    }
+
+    // Set this user as admin
+    const patchRes = await fetch(`${CLERK_BASE}/users/${userId}`, {
+      method: "PATCH",
+      headers: clerkHeaders(),
+      body: JSON.stringify({ public_metadata: { role: "admin" } }),
+    });
+    if (!patchRes.ok) {
+      const err = await patchRes.json();
+      res.status(patchRes.status).json(err);
+      return;
+    }
+    res.json({ ok: true, message: "تم تعيينك مشرفاً. أعد تحميل الصفحة." });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── Dev Agent Chat ───────────────────────────────────────────────────────────
 
 router.post("/admin/dev-agent/chat", requireAdmin, async (req, res) => {

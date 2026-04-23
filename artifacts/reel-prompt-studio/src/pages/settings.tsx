@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useUser } from "@clerk/react";
 import {
   Settings as SettingsIcon,
   Plus,
@@ -16,6 +17,8 @@ import {
   CheckCircle2,
   Info,
   Bot,
+  ShieldCheck,
+  Lock,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -617,8 +620,27 @@ function ServiceAssignmentsCard({
 
 export default function Settings() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const { user, isLoaded: userLoaded } = useUser();
+  const isAdmin = (user?.publicMetadata as any)?.role === "admin";
+  const [bootstrapping, setBootstrapping] = useState(false);
   const [showAddOpenRouter, setShowAddOpenRouter] = useState(false);
   const [showAddCustom, setShowAddCustom] = useState(false);
+
+  async function handleBootstrap() {
+    setBootstrapping(true);
+    try {
+      const res = await fetch("/api/admin/bootstrap", { method: "POST" });
+      const data = await res.json() as { ok?: boolean; message?: string; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "فشل التفعيل");
+      toast({ title: "تم تفعيل المشرف", description: data.message });
+      setTimeout(() => window.location.reload(), 1500);
+    } catch (err: any) {
+      toast({ title: "خطأ", description: err.message, variant: "destructive" });
+    } finally {
+      setBootstrapping(false);
+    }
+  }
 
   const providersQuery = useQuery<{ providers: Provider[] }>({
     queryKey: ["ai-providers"],
@@ -655,6 +677,43 @@ export default function Settings() {
           أضف مزودي الذكاء الاصطناعي وموديلاتهم، ثم اربطها بخدمات الموقع
         </p>
       </div>
+
+      {/* ── Admin Bootstrap Banner ── */}
+      {userLoaded && !isAdmin && (
+        <Card className="border-amber-200 bg-amber-50/60 dark:border-amber-800/50 dark:bg-amber-950/20">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2 text-amber-800 dark:text-amber-300">
+              <Lock className="size-4" />
+              تفعيل صلاحيات المشرف
+            </CardTitle>
+            <CardDescription className="text-amber-700/80 dark:text-amber-400/70 text-sm" dir="rtl">
+              للوصول إلى AI Systems Editor وDev Agent ولوحة التحكم، تحتاج إلى تفعيل دور المشرف.
+              إذا كنت أول مستخدم، اضغط الزر أدناه لتفعيل حسابك.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button
+              size="sm"
+              className="gap-2 bg-amber-600 hover:bg-amber-700 text-white border-0"
+              onClick={handleBootstrap}
+              disabled={bootstrapping}
+            >
+              {bootstrapping
+                ? <div className="size-3.5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                : <ShieldCheck className="size-3.5" />
+              }
+              {bootstrapping ? "جارٍ التفعيل..." : "تفعيل كمشرف"}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {userLoaded && isAdmin && (
+        <div className="flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400 px-1">
+          <ShieldCheck className="size-4" />
+          <span>مسجّل كمشرف — لديك صلاحية الوصول الكاملة</span>
+        </div>
+      )}
 
       {isError && (
         <Alert variant="destructive">
