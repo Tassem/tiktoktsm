@@ -1,0 +1,116 @@
+You are a senior software architect, code auditor, technical writer, QA analyst, and DevOps assistant.
+
+Your mission is to fully analyze, document, and prepare a professional report for this GitHub repository:
+
+Repository URL:
+https://github.com/Tassem/tiktoktsm.git
+
+Main goal:
+Perform a complete technical and functional audit of the entire project, explain what has already been built, what each part does, what is missing or incomplete, and generate full documentation and a professional report. Then commit and push all documentation updates back to GitHub.
+
+Detailed instructions:
+
+1) Repository access and setup
+- Clone the repository locally.
+- Inspect the full project structure.
+- Detect the main technologies used: frontend, backend, database, scripts, automation, APIs, deployment tools, configuration files, CI/CD, containers, environment files, tests, and build tools.
+- If GitHub authentication is required for push access, use the available Git credentials/token. If push access is not available, prepare all files and provide the exact git commands needed to push manually.
+
+2) Full project analysis
+Analyze the project in depth and do NOT make assumptions without evidence from the codebase.
+For every important conclusion, reference the actual files and folders involved.
+
+You must identify and document:
+- Project purpose
+- Main business/use case
+- Full tech stack
+- Architecture style
+- Folder structure and code organization
+- Main modules and responsibilities
+- Implemented features
+- Partially implemented or unfinished features
+- Missing features
+- External integrations and APIs
+- Environment variables and configuration needs
+- Database or storage usage
+- Authentication/authorization flow if present
+- User flows and system flows
+- Scripts and automation processes if present
+- Build, run, test, and deployment process
+- Error handling and logging strategy
+- Security issues or risks
+- Performance issues or bottlenecks
+- Code quality and maintainability observations
+- Technical debt
+- Dead code / duplicate code / TODOs / weak points
+
+3) Documentation deliverables
+Create or update the following files in a clean and professional way:
+
+- README.md
+  Improve the main README so that a new developer can understand the project quickly.
+
+- REPORT.md
+  This should be the main full report for the entire project.
+
+- docs/PROJECT_OVERVIEW.md
+  High-level summary of what the project is and what it does.
+
+- docs/ARCHITECTURE.md
+  Explain the architecture, modules, responsibilities, and interactions.
+  Include Mermaid diagrams if possible.
+
+- docs/PROJECT_STRUCTURE.md
+  Explain the folders, files, and project organization.
+
+- docs/FEATURES.md
+  List completed features, partial features, and missing features.
+
+- docs/SETUP_AND_RUN.md
+  Explain installation, environment variables, local setup, build, run, and deployment.
+
+- docs/API_AND_INTEGRATIONS.md
+  Document APIs, services, webhooks, external providers, and how they are used.
+
+- docs/SECURITY_REVIEW.md
+  Document authentication, secrets handling, permissions, vulnerabilities, and security recommendations.
+
+- docs/TESTING_AND_QUALITY.md
+  Explain test coverage, linting, code quality, and what is missing.
+
+- docs/ROADMAP_AND_RECOMMENDATIONS.md
+  Provide prioritized recommendations:
+  - critical
+  - high
+  - medium
+  - low
+  Also mention quick wins and long-term improvements.
+
+4) REPORT.md structure
+The REPORT.md file must contain at least these sections:
+
+- Executive Summary
+- Project Objective
+- What the Project Does
+- Current Completion Status
+- Tech Stack
+- Architecture Overview
+- Project Structure Analysis
+- Feature-by-Feature Analysis
+- Implemented vs Missing Features
+- Code Quality Review
+- Security Review
+- Performance Review
+- Testing Review
+- Deployment/DevOps Review
+- Risks and Weaknesses
+- Recommendations
+- Final Conclusion
+
+5) Quality requirements
+- Be precise and professional.
+- Do not hallucinate or invent features.
+- If something cannot be verified from the code, explicitly say “Not verified from repository”.
+- Use tables where useful.
+- Reference actual files, folders, and code locations.
+- Keep 

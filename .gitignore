@@ -47,3 +47,13 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Environment secrets — NEVER commit
+.env
+.env.local
+.env.production
+
+# Database backups — contain real data
+db_backup_*.sql
+*.dump
+*.pgdump
