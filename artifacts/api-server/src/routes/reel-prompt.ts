@@ -37,6 +37,7 @@ import {
   reelAnalysesTable,
   scenePromptsTable,
   aiSystemPromptsTable,
+  siteSettingsTable,
   type Niche,
   type PromptPack,
   type ProviderSettings,
@@ -244,6 +245,10 @@ router.delete("/niches/:nicheId", async (req, res): Promise<void> => {
 router.get("/provider-settings", async (_req, res): Promise<void> => {
   const settings = await ensureProviderSettings();
 
+  // Check forceDemoMode from site settings
+  const siteRows = await db.select().from(siteSettingsTable).limit(1);
+  const forceDemoMode = siteRows[0]?.forceDemoMode ?? false;
+
   // Check if real AI is available via: Replit AI env vars OR new DB service assignments
   const hasReplitAI = !!(
     process.env["AI_INTEGRATIONS_OPENAI_BASE_URL"] &&
@@ -253,9 +258,13 @@ router.get("/provider-settings", async (_req, res): Promise<void> => {
   const hasRealAI = hasReplitAI || !!dbModel;
 
   const serialized = serializeProvider(settings);
-  if (hasRealAI) {
+  // forceDemoMode overrides even if real AI is available
+  if (hasRealAI && !forceDemoMode) {
     serialized.realAnalysisEnabled = true;
   }
+
+  (serialized as any).forceDemoMode = forceDemoMode;
+  (serialized as any).aiConnected = hasRealAI;
 
   res.json(GetProviderSettingsResponse.parse(serialized));
 });

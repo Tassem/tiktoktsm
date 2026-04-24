@@ -341,10 +341,10 @@ export async function buildAIVideoPromptPack(input: {
 }): Promise<GeneratedPromptPack> {
   const { baseUrl, apiKey, modelId: defaultModel } = await resolveAiConfig("video-analysis");
 
-  // Use low-detail frames to stay within token limits — "high" detail with 32 frames
-  // causes timeouts and truncated JSON. 16 low-detail frames give sufficient visual
-  // coverage for a 90-second reel (~1 frame every 5-6s) at a fraction of the token cost.
-  const frameInputs = buildFrameInputs(input.videoFrames, 16, "low");
+  // 24 low-detail frames for comprehensive scene coverage (~1 frame per 3-4s for a 90s reel).
+  // "low" detail keeps token cost manageable while allowing enough visual density
+  // for the AI to capture scene changes, actions, and character details.
+  const frameInputs = buildFrameInputs(input.videoFrames, 24, "low");
 
   if (frameInputs.length === 0) {
     throw new Error("No video frames were provided for analysis.");

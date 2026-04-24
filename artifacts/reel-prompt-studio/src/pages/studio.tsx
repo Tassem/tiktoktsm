@@ -722,7 +722,7 @@ async function extractVideoFrames(file: File) {
 
     const canvas = document.createElement("canvas");
     const aspectRatio = video.videoWidth > 0 && video.videoHeight > 0 ? video.videoWidth / video.videoHeight : 9 / 16;
-    canvas.width = 300;
+    canvas.width = 400;
     canvas.height = Math.round(canvas.width / aspectRatio);
     const context = canvas.getContext("2d");
 
@@ -731,7 +731,8 @@ async function extractVideoFrames(file: File) {
     }
 
     const usableDuration = Math.max(video.duration - 0.2, 0.1);
-    const frameCount = Math.min(32, Math.max(8, Math.ceil(video.duration / 4)));
+    // 1 frame per 3 seconds = better scene coverage; cap at 48 to avoid very long uploads
+    const frameCount = Math.min(48, Math.max(12, Math.ceil(video.duration / 3)));
     const times = Array.from({ length: frameCount }, (_, index) => {
       const ratio = frameCount === 1 ? 0.5 : index / (frameCount - 1);
       return Math.min(usableDuration, 0.15 + ratio * Math.max(usableDuration - 0.15, 0.1));
@@ -742,7 +743,7 @@ async function extractVideoFrames(file: File) {
       video.currentTime = time;
       await waitForVideoEvent(video, "seeked");
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      frames.push(canvas.toDataURL("image/jpeg", 0.55));
+      frames.push(canvas.toDataURL("image/jpeg", 0.65));
     }
 
     return { frames, durationSeconds: video.duration };

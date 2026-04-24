@@ -15,10 +15,13 @@ import {
   Zap,
   LayoutGrid,
   Wrench,
+  WifiOff,
+  BrainCircuit,
 } from "lucide-react";
 import { ReactNode } from "react";
 import { useHealthCheck } from "@workspace/api-client-react";
 import { useUser, useClerk, useAuth } from "@clerk/react";
+import { useQuery } from "@tanstack/react-query";
 import { AnnouncementBanners } from "@/components/announcement-banner";
 
 const AUTH_PATHS = ["/sign-in", "/sign-up"];
@@ -45,6 +48,22 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
   const role = (user?.publicMetadata as any)?.role as string | undefined;
   const isAdmin = role === "admin";
+
+  const { data: providerData } = useQuery<{ aiConnected?: boolean; forceDemoMode?: boolean; realAnalysisEnabled?: boolean }>({
+    queryKey: ["provider-settings-status"],
+    queryFn: async () => {
+      const r = await fetch("/api/provider-settings", { credentials: "include" });
+      if (!r.ok) throw new Error("failed");
+      return r.json();
+    },
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
+
+  const aiConnected = providerData?.aiConnected ?? false;
+  const forceDemoMode = providerData?.forceDemoMode ?? false;
+  const aiStatus: "connected" | "demo" | "disconnected" =
+    forceDemoMode ? "demo" : aiConnected ? "connected" : "disconnected";
 
   if (isAuthPath(location) || !isSignedIn) {
     return <>{children}</>;
@@ -205,6 +224,32 @@ export function AppLayout({ children }: { children: ReactNode }) {
                 ? <span className="text-emerald-400 font-medium">Online</span>
                 : <span className="text-red-400 font-medium">Offline</span>}
             </span>
+          </div>
+
+          {/* AI status */}
+          <div className={`flex items-center gap-2 px-2 text-[11px] rounded-md py-1 ${
+            aiStatus === "connected" ? "text-emerald-400/70" :
+            aiStatus === "demo" ? "text-amber-400/70" :
+            "text-red-400/70"
+          }`}>
+            {aiStatus === "connected" && (
+              <>
+                <BrainCircuit className="w-3 h-3 shrink-0" />
+                <span>AI: <span className="font-semibold text-emerald-400">متصل</span></span>
+              </>
+            )}
+            {aiStatus === "demo" && (
+              <>
+                <BrainCircuit className="w-3 h-3 shrink-0 text-amber-400" />
+                <span>AI: <span className="font-semibold text-amber-400">وضع ديمو</span></span>
+              </>
+            )}
+            {aiStatus === "disconnected" && (
+              <>
+                <WifiOff className="w-3 h-3 shrink-0 text-red-400" />
+                <span className="text-red-400/80">AI غير متصل — أضف مزوداً</span>
+              </>
+            )}
           </div>
         </div>
       </aside>

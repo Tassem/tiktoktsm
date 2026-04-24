@@ -109,6 +109,7 @@ export const siteSettingsTable = pgTable("site_settings", {
   contactWebsite: text("contact_website"),
   footerText: text("footer_text"),
   announcementSliderDuration: integer("announcement_slider_duration").notNull().default(5),
+  forceDemoMode: boolean("force_demo_mode").notNull().default(false),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });
 

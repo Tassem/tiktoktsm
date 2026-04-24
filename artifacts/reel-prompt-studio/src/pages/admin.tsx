@@ -35,6 +35,7 @@ interface SiteSettings {
   contactWebsite: string | null;
   footerText: string | null;
   announcementSliderDuration: number;
+  forceDemoMode: boolean;
 }
 
 interface Announcement {
@@ -335,6 +336,28 @@ function SiteSettingsTab() {
             />
           </div>
         )}
+
+        <div className={`flex items-center justify-between p-3 rounded-lg border transition-all ${current.forceDemoMode ? "bg-amber-500/8 border-amber-500/30" : "bg-white/[0.03] border-white/[0.06]"}`}>
+          <div>
+            <p className="text-sm font-medium text-white/70 flex items-center gap-2">
+              {current.forceDemoMode
+                ? <><span className="inline-block w-2 h-2 rounded-full bg-amber-400 animate-pulse" /> وضع الديمو مُفعَّل</>
+                : <><span className="inline-block w-2 h-2 rounded-full bg-emerald-400" /> وضع الذكاء الاصطناعي الحقيقي</>
+              }
+            </p>
+            <p className="text-xs text-white/30 mt-0.5">
+              {current.forceDemoMode
+                ? "جميع التحليلات تستخدم بيانات تجريبية — مفيد للاختبار"
+                : "التحليلات تستخدم الذكاء الاصطناعي الفعلي عند توفر المزود"}
+            </p>
+          </div>
+          <button
+            onClick={() => set("forceDemoMode", !current.forceDemoMode)}
+            className={`w-11 h-6 rounded-full transition-all relative ${current.forceDemoMode ? "bg-amber-500" : "bg-emerald-500"}`}
+          >
+            <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${current.forceDemoMode ? "right-1" : "left-1"}`} />
+          </button>
+        </div>
       </GlassCard>
 
       <GlassCard className="p-5 space-y-5">

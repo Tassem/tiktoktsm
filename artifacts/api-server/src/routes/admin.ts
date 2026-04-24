@@ -40,7 +40,7 @@ router.put("/admin/site-settings", requireAdmin, async (req, res) => {
       registrationMode, inviteCode,
       contactEmail, contactTwitter, contactInstagram,
       contactWhatsapp, contactWebsite, footerText,
-      announcementSliderDuration,
+      announcementSliderDuration, forceDemoMode,
     } = req.body as Record<string, any>;
 
     const settings = await getOrCreateSiteSettings();
@@ -59,6 +59,7 @@ router.put("/admin/site-settings", requireAdmin, async (req, res) => {
         ...(contactWebsite !== undefined && { contactWebsite: contactWebsite || null }),
         ...(footerText !== undefined && { footerText: footerText || null }),
         ...(announcementSliderDuration !== undefined && { announcementSliderDuration: Math.max(1, Math.min(60, Number(announcementSliderDuration))) }),
+        ...(forceDemoMode !== undefined && { forceDemoMode: Boolean(forceDemoMode) }),
       })
       .where(eq(siteSettingsTable.id, settings.id))
       .returning();
@@ -83,6 +84,7 @@ router.get("/public/site-settings", async (req, res) => {
       contactWebsite: settings.contactWebsite,
       footerText: settings.footerText,
       announcementSliderDuration: settings.announcementSliderDuration,
+      forceDemoMode: settings.forceDemoMode,
     });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
