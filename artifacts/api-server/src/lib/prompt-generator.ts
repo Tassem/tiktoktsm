@@ -341,16 +341,22 @@ export async function buildAIVideoPromptPack(input: {
 }): Promise<GeneratedPromptPack> {
   const { baseUrl, apiKey, modelId: defaultModel } = await resolveAiConfig("video-analysis");
 
-  const frameInputs = buildFrameInputs(input.videoFrames, 32, "high");
+  // Use low-detail frames to stay within token limits — "high" detail with 32 frames
+  // causes timeouts and truncated JSON. 16 low-detail frames give sufficient visual
+  // coverage for a 90-second reel (~1 frame every 5-6s) at a fraction of the token cost.
+  const frameInputs = buildFrameInputs(input.videoFrames, 16, "low");
 
   if (frameInputs.length === 0) {
     throw new Error("No video frames were provided for analysis.");
   }
 
   const audioTranscript = input.videoDataUrl ? await transcribeVideoAudio(input.videoDataUrl, baseUrl, apiKey) : null;
-  const sendAnalysisRequest = (frames: ReturnType<typeof buildFrameInputs>, retryNote = "") =>
-    fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+  const sendAnalysisRequest = (frames: ReturnType<typeof buildFrameInputs>, retryNote = "") => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4 * 60 * 1000); // 4-min hard timeout
+    return fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
+      signal: controller.signal,
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
@@ -506,9 +512,10 @@ The scenes array must contain as many objects as the video content requires. Do 
             ],
           },
         ],
-        max_completion_tokens: 28000,
+        max_completion_tokens: 16000,
       }),
-    });
+    }).finally(() => clearTimeout(timeoutId));
+  };
 
   let response = await sendAnalysisRequest(frameInputs);
 
