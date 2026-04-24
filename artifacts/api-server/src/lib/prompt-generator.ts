@@ -48,7 +48,7 @@ async function resolveAiConfig(serviceName: string): Promise<{ baseUrl: string; 
   const baseUrl = process.env["AI_INTEGRATIONS_OPENAI_BASE_URL"];
   const apiKey = process.env["AI_INTEGRATIONS_OPENAI_API_KEY"];
   if (baseUrl && apiKey) {
-    return { baseUrl, apiKey, modelId: "gpt-5.2" };
+    return { baseUrl, apiKey, modelId: "gpt-5.4" };
   }
 
   throw new Error(
@@ -350,10 +350,13 @@ export async function buildAIVideoPromptPack(input: {
     throw new Error("No video frames were provided for analysis.");
   }
 
-  const audioTranscript = input.videoDataUrl ? await transcribeVideoAudio(input.videoDataUrl, baseUrl, apiKey) : null;
+  // Transcription is best-effort — a slow or failed transcription must not block the analysis.
+  const audioTranscript = input.videoDataUrl
+    ? await transcribeVideoAudio(input.videoDataUrl, baseUrl, apiKey).catch(() => null)
+    : null;
   const sendAnalysisRequest = (frames: ReturnType<typeof buildFrameInputs>, retryNote = "") => {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4 * 60 * 1000); // 4-min hard timeout
+    const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000); // 5-min hard timeout
     return fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
       signal: controller.signal,
@@ -910,13 +913,16 @@ async function transcribeVideoAudio(videoDataUrl: string, baseUrl: string, apiKe
     formData.append("file", new Blob([audioBuffer], { type: "audio/wav" }), "audio.wav");
     formData.append("response_format", "json");
 
+    const transcribeController = new AbortController();
+    const transcribeTimeout = setTimeout(() => transcribeController.abort(), 60 * 1000); // 60s max
     const response = await fetch(`${baseUrl.replace(/\/$/, "")}/audio/transcriptions`, {
       method: "POST",
+      signal: transcribeController.signal,
       headers: {
         Authorization: `Bearer ${apiKey}`,
       },
       body: formData,
-    });
+    }).finally(() => clearTimeout(transcribeTimeout));
 
     if (!response.ok) {
       const errorText = await response.text();
