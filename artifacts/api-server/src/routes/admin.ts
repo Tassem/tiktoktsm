@@ -6,6 +6,7 @@ import { requireAdmin, requireAuth } from "../middlewares/auth";
 import { db, siteSettingsTable, announcementsTable } from "@workspace/db";
 import { loadSystemPrompt } from "../lib/ai-system-prompts";
 import { getUserKey } from "./user-keys";
+import { getServiceModel } from "./ai-providers";
 
 const router: IRouter = Router();
 
@@ -236,21 +237,37 @@ router.post("/admin/dev-agent/chat", requireAdmin, async (req, res) => {
 
     const userId = (req as any).userId ?? "anonymous";
 
-    const userApiKey = userId ? await getUserKey(userId, "openai").catch(() => null) : null;
-    const baseUrl = userApiKey
-      ? "https://api.openai.com/v1"
-      : process.env["AI_INTEGRATIONS_OPENAI_BASE_URL"];
-    const apiKey = userApiKey ?? process.env["AI_INTEGRATIONS_OPENAI_API_KEY"];
-
-    if (!baseUrl || !apiKey) {
-      res.status(503).json({ error: "يجب تهيئة مفتاح AI أولاً في إعدادات المستخدم." });
-      return;
-    }
-
     const devAgentSystem = await loadSystemPrompt("dev-agent", { withModel: true }).catch(() => null);
     const systemPromptText = devAgentSystem?.systemPrompt ??
       "You are an AI Prompt Engineering Consultant. Help the admin improve Video to Prompt and Remix Studio quality.";
     const modelOverride = devAgentSystem?.modelOverride;
+
+    // Resolve AI provider: user key → service assignment → env vars
+    let baseUrl: string | undefined;
+    let apiKey: string | undefined;
+    let resolvedModel = modelOverride ?? "gpt-4o";
+
+    const userApiKey = userId ? await getUserKey(userId, "openai").catch(() => null) : null;
+    if (userApiKey) {
+      baseUrl = "https://api.openai.com/v1";
+      apiKey = userApiKey;
+    } else {
+      // Try the provider system (service assignment for "dev-agent" or "video-analysis")
+      const serviceModel = await getServiceModel("dev-agent") ?? await getServiceModel("video-analysis");
+      if (serviceModel) {
+        baseUrl = serviceModel.baseUrl;
+        apiKey = serviceModel.apiKey;
+        if (!modelOverride) resolvedModel = serviceModel.modelId;
+      } else {
+        baseUrl = process.env["AI_INTEGRATIONS_OPENAI_BASE_URL"];
+        apiKey = process.env["AI_INTEGRATIONS_OPENAI_API_KEY"];
+      }
+    }
+
+    if (!baseUrl || !apiKey) {
+      res.status(503).json({ error: "يجب تهيئة مفتاح AI أولاً في إعدادات المستخدم أو إضافة مزود في الإعدادات." });
+      return;
+    }
 
     let contextSuffix = "";
     if (systemKey) {
@@ -289,7 +306,7 @@ router.post("/admin/dev-agent/chat", requireAdmin, async (req, res) => {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: modelOverride ?? "gpt-4o",
+        model: resolvedModel,
         messages,
         max_completion_tokens: 3000,
       }),
