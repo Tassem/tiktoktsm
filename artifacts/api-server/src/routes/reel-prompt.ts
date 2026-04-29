@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { and, count, desc, eq, inArray, isNotNull } from "drizzle-orm";
-import { getAuth } from "@clerk/express";
+import type { Request } from "express";
 import {
   CreateAnalysisBody,
   CreateNicheBody,
@@ -106,8 +106,8 @@ function notFound(message: string) {
   return { error: message };
 }
 
-function uid(req: Parameters<typeof getAuth>[0]): string | null {
-  return getAuth(req)?.userId ?? null;
+function uid(req: Request): string | null {
+  return (req as any).userId ?? "anonymous";
 }
 
 async function findNiche(nicheId: number, userId: string): Promise<Niche | undefined> {

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useUser, useAuth } from "@clerk/react";
+
 import {
   Settings as SettingsIcon,
   Plus,
@@ -83,16 +83,11 @@ type AvailableModel = {
 
 // ─── API helpers ─────────────────────────────────────────────────────────────
 
-// Module-level token cache — updated by useSetupAuth hook inside Settings component
-let _getToken: (() => Promise<string | null>) | null = null;
-
 async function apiFetch(url: string, opts?: RequestInit) {
-  const token = _getToken ? await _getToken() : null;
   const res = await fetch(url, {
     credentials: "include",
     ...opts,
     headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(opts?.headers ?? {}),
     },
   });
@@ -101,14 +96,6 @@ async function apiFetch(url: string, opts?: RequestInit) {
     throw new Error(err.error ?? `HTTP ${res.status}`);
   }
   return res.json();
-}
-
-function useSetupAuth() {
-  const { getToken } = useAuth();
-  useEffect(() => {
-    _getToken = getToken;
-    return () => { _getToken = null; };
-  }, [getToken]);
 }
 
 // Popular OpenRouter models to suggest
@@ -887,11 +874,9 @@ function ServiceAssignmentsCard({
 // ─── Main Settings Page ───────────────────────────────────────────────────────
 
 export default function Settings() {
-  useSetupAuth();
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const { user, isLoaded: userLoaded } = useUser();
-  const isAdmin = (user?.publicMetadata as any)?.role === "admin";
+  const isAdmin = true;
   const [bootstrapping, setBootstrapping] = useState(false);
   const [showAddOpenRouter, setShowAddOpenRouter] = useState(false);
   const [showAddCustom, setShowAddCustom] = useState(false);
@@ -948,7 +933,7 @@ export default function Settings() {
       </div>
 
       {/* ── Admin Bootstrap Banner ── */}
-      {userLoaded && !isAdmin && (
+      {!isAdmin && (
         <Card className="border-amber-200 bg-amber-50/60 dark:border-amber-800/50 dark:bg-amber-950/20">
           <CardHeader className="pb-2">
             <CardTitle className="text-base flex items-center gap-2 text-amber-800 dark:text-amber-300">
@@ -977,7 +962,7 @@ export default function Settings() {
         </Card>
       )}
 
-      {userLoaded && isAdmin && (
+      {isAdmin && (
         <div className="flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400 px-1">
           <ShieldCheck className="size-4" />
           <span>مسجّل كمشرف — لديك صلاحية الوصول الكاملة</span>

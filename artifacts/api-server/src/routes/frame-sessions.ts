@@ -1,14 +1,14 @@
 import { Router } from "express";
 import { db, frameSessionsTable } from "@workspace/db";
 import { and, desc, eq } from "drizzle-orm";
-import { getAuth } from "@clerk/express";
+import type { Request } from "express";
 
 const router = Router();
 
 type FrameInput = { index: number; dataUrl: string; timestampMs: number };
 
-function uid(req: Parameters<typeof getAuth>[0]): string | null {
-  return getAuth(req)?.userId ?? null;
+function uid(req: Request): string | null {
+  return (req as any).userId ?? "anonymous";
 }
 
 function serializeSession(row: typeof frameSessionsTable.$inferSelect, includeFrames: boolean) {
