@@ -149,7 +149,7 @@ export const ListAnalysesResponse = zod.array(ListAnalysesResponseItem);
 /**
  * @summary Analyze reel and create prompt pack
  */
-export const createAnalysisBodyVideoFramesMax = 32;
+export const createAnalysisBodyVideoFramesMax = 100;
 
 export const CreateAnalysisBody = zod.object({
   nicheId: zod.number(),

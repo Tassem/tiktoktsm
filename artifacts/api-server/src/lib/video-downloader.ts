@@ -103,10 +103,9 @@ async function downloadInstagram(url: string, outputPath: string): Promise<void>
 }
 
 function optimalFrameCount(durationSeconds: number): number {
-  if (durationSeconds <= 15) return 30;
-  if (durationSeconds <= 30) return 45;
-  if (durationSeconds <= 60) return 60;
-  return 90;
+  // 1 frame per second, with minimum 15 and maximum 90
+  if (durationSeconds <= 15) return 15;
+  return Math.min(90, Math.ceil(durationSeconds));
 }
 
 async function extractFramesFromFile(
@@ -125,15 +124,15 @@ async function extractFramesFromFile(
   const durationSeconds = parseFloat(probe.format?.duration ?? "0") || 30;
 
   const maxFrames = maxFramesOverride ?? optimalFrameCount(durationSeconds);
-  const frameInterval = Math.max(1, Math.floor(durationSeconds / maxFrames));
   const framesDir = path.join(workDir, "frames");
   await mkdir(framesDir, { recursive: true });
 
+  // Extract at 1 fps with 640px width and high quality JPEG
   await execFileAsync("ffmpeg", [
     "-y", "-i", videoPath,
-    "-vf", `fps=1/${frameInterval},scale=1080:-2`,
+    "-vf", "fps=1,scale=640:-2",
     "-vframes", String(maxFrames),
-    "-q:v", "3",
+    "-q:v", "2",
     path.join(framesDir, "frame_%04d.jpg"),
   ], { timeout: 120_000 });
 
