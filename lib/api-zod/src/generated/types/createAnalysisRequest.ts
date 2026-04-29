@@ -14,7 +14,7 @@ export interface CreateAnalysisRequest {
   demoMode: boolean;
   /**
    * JPEG data URLs extracted from the uploaded video for real visual analysis.
-   * @maxItems 32
+   * @maxItems 100
    */
   videoFrames?: string[];
   /** Original uploaded video as a data URL so the server can extract and transcribe audio for full analysis. */

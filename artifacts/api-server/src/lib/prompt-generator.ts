@@ -341,19 +341,35 @@ export async function buildAIVideoPromptPack(input: {
 }): Promise<GeneratedPromptPack> {
   const { baseUrl, apiKey, modelId: defaultModel } = await resolveAiConfig("video-analysis");
 
-  // 24 low-detail frames for comprehensive scene coverage (~1 frame per 3-4s for a 90s reel).
-  // "low" detail keeps token cost manageable while allowing enough visual density
-  // for the AI to capture scene changes, actions, and character details.
-  const frameInputs = buildFrameInputs(input.videoFrames, 24, "low");
+  // Run scene detection and audio transcription in parallel when video data is available
+  const [sceneDetection, audioTranscript] = await Promise.all([
+    input.videoDataUrl
+      ? import("./scene-detect.js").then((m) => m.detectScenesFromVideo(input.videoDataUrl!)).catch(() => null)
+      : Promise.resolve(null),
+    input.videoDataUrl
+      ? transcribeVideoAudio(input.videoDataUrl, baseUrl, apiKey).catch(() => null)
+      : Promise.resolve(null),
+  ]);
 
-  if (frameInputs.length === 0) {
+  // Smart frame selection: prioritize scene-change frames, fill gaps with interval frames
+  const frameInputs = buildSmartFrameInputs(
+    input.videoFrames,
+    sceneDetection?.sceneTimestamps ?? [],
+    sceneDetection?.durationSeconds ?? 0,
+    40,
+    "low",
+  );
+
+  if (frameInputs.frames.length === 0) {
     throw new Error("No video frames were provided for analysis.");
   }
 
-  // Transcription is best-effort — a slow or failed transcription must not block the analysis.
-  const audioTranscript = input.videoDataUrl
-    ? await transcribeVideoAudio(input.videoDataUrl, baseUrl, apiKey).catch(() => null)
-    : null;
+  const sceneChangeInfo = sceneDetection
+    ? `\n- Scene change detection found ${sceneDetection.sceneTimestamps.length} visual cuts at timestamps: [${sceneDetection.sceneTimestamps.map((t) => t.toFixed(1) + "s").join(", ")}]. Frames marked with [SCENE-CHANGE] are at these cut points — they are critical for identifying scene boundaries.`
+    : "";
+  const frameTimingInfo = frameInputs.timestamps.length > 0
+    ? `\n- Frame timestamps: ${frameInputs.timestamps.map((t, i) => `Frame ${i + 1}: ${t.toFixed(1)}s${frameInputs.sceneChangeFlags[i] ? " [SCENE-CHANGE]" : ""}`).join(", ")}`
+    : "";
   const sendAnalysisRequest = (frames: ReturnType<typeof buildFrameInputs>, retryNote = "") => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000); // 5-min hard timeout
@@ -487,7 +503,7 @@ WHAT TO IGNORE
 ADDITIONAL CONTEXT
 ═══════════════════
 - User notes (extra context only, does not override frames): ${input.reelNotes}
-- Audio transcript: ${audioTranscript || "No usable speech transcript was extracted. Describe background sound from visual context only and do not claim exact spoken lines."}
+- Audio transcript: ${audioTranscript || "No usable speech transcript was extracted. Describe background sound from visual context only and do not claim exact spoken lines."}${sceneChangeInfo}${frameTimingInfo}
 ${retryNote}
 
 ═══════════════════
@@ -520,7 +536,7 @@ The scenes array must contain as many objects as the video content requires. Do 
     }).finally(() => clearTimeout(timeoutId));
   };
 
-  let response = await sendAnalysisRequest(frameInputs);
+  let response = await sendAnalysisRequest(frameInputs.frames);
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -752,6 +768,105 @@ function buildFrameInputs(videoFrames: string[], limit: number, detail: "high" |
       detail,
     },
   }));
+}
+
+/**
+ * Smart frame selection that prioritizes scene-change frames.
+ * Combines scene-change timestamps from FFmpeg with evenly-spaced browser-extracted frames.
+ */
+function buildSmartFrameInputs(
+  videoFrames: string[],
+  sceneTimestamps: number[],
+  durationSeconds: number,
+  limit: number,
+  detail: "high" | "low",
+): {
+  frames: { type: "image_url"; image_url: { url: string; detail: "high" | "low" } }[];
+  timestamps: number[];
+  sceneChangeFlags: boolean[];
+} {
+  if (videoFrames.length === 0) {
+    return { frames: [], timestamps: [], sceneChangeFlags: [] };
+  }
+
+  // If no scene detection data, fall back to evenly-spaced selection
+  if (sceneTimestamps.length === 0 || durationSeconds <= 0) {
+    const selected = selectEvenlySpacedItems(videoFrames, Math.min(limit, videoFrames.length));
+    return {
+      frames: selected.map((frame) => ({ type: "image_url" as const, image_url: { url: frame, detail } })),
+      timestamps: selected.map((_, i) => (durationSeconds > 0 ? (i / Math.max(selected.length - 1, 1)) * durationSeconds : i)),
+      sceneChangeFlags: selected.map(() => false),
+    };
+  }
+
+  // Map each frame to its estimated timestamp based on even distribution
+  const frameTimestamps = videoFrames.map((_, i) =>
+    (i / Math.max(videoFrames.length - 1, 1)) * durationSeconds,
+  );
+
+  // Find the closest frame to each scene-change timestamp
+  const sceneChangeFrameIndices = new Set<number>();
+  for (const sceneTs of sceneTimestamps) {
+    let closestIdx = 0;
+    let closestDist = Infinity;
+    for (let i = 0; i < frameTimestamps.length; i++) {
+      const dist = Math.abs(frameTimestamps[i] - sceneTs);
+      if (dist < closestDist) {
+        closestDist = dist;
+        closestIdx = i;
+      }
+    }
+    sceneChangeFrameIndices.add(closestIdx);
+  }
+
+  // Build selection: scene-change frames are mandatory, fill rest with evenly spaced
+  const sceneIndices = Array.from(sceneChangeFrameIndices).sort((a, b) => a - b);
+  const remaining = limit - sceneIndices.length;
+
+  let selectedIndices: number[];
+  if (remaining <= 0) {
+    // Too many scene changes — take evenly spaced subset of scene frames
+    selectedIndices = selectEvenlySpacedItems(sceneIndices, limit);
+  } else {
+    // Fill gaps with non-scene frames, ensuring no gap > 2 seconds
+    const nonSceneIndices: number[] = [];
+    for (let i = 0; i < videoFrames.length; i++) {
+      if (!sceneChangeFrameIndices.has(i)) nonSceneIndices.push(i);
+    }
+    const fillers = selectEvenlySpacedItems(nonSceneIndices, remaining);
+    selectedIndices = [...new Set([...sceneIndices, ...fillers])].sort((a, b) => a - b);
+
+    // Ensure no gap > 2 seconds
+    const maxGapFrames = Math.ceil(2 / (durationSeconds / videoFrames.length));
+    const filled: number[] = [...selectedIndices];
+    for (let i = 0; i < filled.length - 1; i++) {
+      const gap = filled[i + 1] - filled[i];
+      if (gap > maxGapFrames) {
+        const mid = Math.round((filled[i] + filled[i + 1]) / 2);
+        if (!filled.includes(mid)) filled.push(mid);
+      }
+    }
+    selectedIndices = [...new Set(filled)].sort((a, b) => a - b);
+
+    // Cap at limit
+    if (selectedIndices.length > limit) {
+      // Keep all scene frames, reduce fillers
+      const sceneSet = new Set(sceneIndices);
+      const keptScene = selectedIndices.filter((i) => sceneSet.has(i));
+      const keptOther = selectedIndices.filter((i) => !sceneSet.has(i));
+      const trimmedOther = selectEvenlySpacedItems(keptOther, limit - keptScene.length);
+      selectedIndices = [...new Set([...keptScene, ...trimmedOther])].sort((a, b) => a - b);
+    }
+  }
+
+  return {
+    frames: selectedIndices.map((i) => ({
+      type: "image_url" as const,
+      image_url: { url: videoFrames[i], detail },
+    })),
+    timestamps: selectedIndices.map((i) => frameTimestamps[i]),
+    sceneChangeFlags: selectedIndices.map((i) => sceneChangeFrameIndices.has(i)),
+  };
 }
 
 function selectEvenlySpacedItems<T>(items: T[], count: number) {
