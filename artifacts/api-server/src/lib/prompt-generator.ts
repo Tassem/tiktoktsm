@@ -781,13 +781,12 @@ The scenes array must contain as many objects as the video content requires. Do 
   let retryCount = 0;
 
   // Auto-retry on critical validation failure (up to 2 retries)
+  const sceneTimestamps = sceneDetection?.sceneTimestamps ?? [];
   if (validation.severity === "critical" && detectedSceneCount > 0) {
-    // Attempt 2: Retry with explicit scene count instruction
+    // Attempt 2: Targeted retry — tell AI exactly which timestamps were missed
     retryCount++;
-    const retryResponse = await sendAnalysisRequest(
-      frameInputs.frames,
-      `\n\n⚠️ CRITICAL RETRY — Your previous response had ${result.scenes.length} scenes but the video has approximately ${detectedSceneCount} scenes. You MUST return at least ${detectedSceneCount} scene objects. Focus on scene detection accuracy and image prompts.`,
-    );
+    const targetedPrompt = buildTargetedRetryPrompt(result, validation, sceneTimestamps, videoDuration);
+    const retryResponse = await sendAnalysisRequest(frameInputs.frames, targetedPrompt);
 
     if (retryResponse.ok) {
       const retryResult = await normalizeVideoAnalysisResponse(await retryResponse.json(), baseUrl, apiKey, input);
@@ -799,12 +798,12 @@ The scenes array must contain as many objects as the video content requires. Do 
       }
     }
 
-    // Attempt 3 if still critical: simplified prompt
+    // Attempt 3 if still critical: minimal scene-focused prompt
     if (validation.severity === "critical") {
       retryCount++;
       const simplifiedResponse = await sendAnalysisRequest(
         frameInputs.frames,
-        `\n\n⚠️ FINAL RETRY — Previous attempts failed quality checks. SIMPLIFIED TASK: Return ${detectedSceneCount} scenes minimum. Each scene MUST have image_prompt (80+ words), animation_prompt, scene_type, timestamp_start, timestamp_end. Skip character registry and sound design if needed — scene coverage is the priority.`,
+        `\n\n⚠️ FINAL RETRY — Previous attempts failed quality checks.\n\nSIMPLIFIED TASK: Return ${detectedSceneCount} scenes minimum.\nRequired timestamps: ${sceneTimestamps.map((t) => t.toFixed(1) + "s").join(", ")}\n\nFor EACH timestamp create a scene with:\n- image_prompt (80+ words minimum)\n- animation_prompt\n- scene_type\n- timestamp_start and timestamp_end\n\nSkip character registry and sound design — scene coverage is the priority.\nReturn ONLY valid JSON.`,
       );
 
       if (simplifiedResponse.ok) {
@@ -1513,26 +1512,77 @@ async function transcribeVideoAudioWithSegments(
   }
 }
 
+// 150+ Darija markers covering common expressions, verbs, adjectives, pronouns,
+// quantifiers, slang, and Casablanca/Rabat-style online vocabulary.
 const DARIJA_MARKERS = new Set([
-  "ghadi", "walo", "bzzaf", "dyal", "machi", "rah", "hna", "fhad",
-  "khas", "katban", "bghiti", "chouf", "lmochkil", "tbedel", "fikra",
-  "kayn", "hadchi", "mnin", "chhal", "wakha", "bzaf", "daba", "bach",
-  "fach", "wach", "dial", "lhaja", "kolchi", "chkon", "kifach", "fin",
+  // Greetings & common expressions
+  "salam", "labas", "mzyan", "bghit", "walo", "bzzaf", "bzaf",
+  "dyal", "dyali", "dyalna", "dyalha", "dyalkom", "dyalhom",
+  "rah", "kayn", "makaynch", "wash", "wach", "wakha", "yallah",
+  "hadchi", "hadak", "hadik", "hada", "hadi", "hado", "hadouk",
+  "fach", "machi", "mashi", "bach", "ghi", "gha", "ghadi",
+  "nta", "nti", "ntoma", "howa", "hiya", "homa",
+  "ana", "hnaya", "tma", "fin", "kifach", "mnin",
+  "3lach", "3la", "fhad", "hna",
+  // Verbs (common Darija)
+  "gal", "galt", "galo", "ja", "jat", "jaw",
+  "msha", "mshat", "msho", "dar", "dart", "daro",
+  "kan", "kanet", "kano", "bda", "bdat", "bdaw",
+  "wqf", "sifet", "jab", "kla", "shreb", "nna",
+  "fhem", "3ref", "sme3", "chaf", "gls", "nod",
+  "rj3", "khrej", "dkhel", "hab", "bghiti", "fham",
+  "katban", "tbedel", "chouf", "khas",
+  // Adjectives & descriptors
+  "kbir", "sghir", "zwine", "kbira", "mzyana",
+  "bhal", "kima", "hit", "ghir", "3ad", "daba",
+  "men3d", "qdim", "jdid", "hsen", "khayb",
+  "mhemm", "sahel", "s3ib", "rkhis", "ghali",
+  // Numbers & quantifiers (Moroccan style)
+  "wahed", "jouj", "tlata", "rb3a", "khmsa",
+  "setta", "sb3a", "tmnya", "ts3ud", "3ashra",
+  "chwiya", "noss", "kolchi",
+  // Pronouns & particles
+  "dial", "lhaja", "chkon", "fikra", "lmochkil",
+  "hadak", "dik", "dak", "hak", "chno", "achno",
+  "ash", "aash", "lla", "naam", "bla", "bla",
+  // Moroccan slang (common online)
+  "khouya", "khti", "aji", "sir", "sahbi", "lwalid",
+  "lwalida", "drari", "bnat", "wlad", "zwin", "zwina",
+  "3awed", "bsahtek", "tawba", "inshallah", "bismillah",
+  "hamdullah", "subhanallah", "mashallah",
+  // Additional common Darija
+  "walakin", "ila", "amma", "walaynni", "7it",
+  "dima", "b7al", "mn", "li", "fih", "fiha",
+  "3ndek", "3ndi", "3ndna", "3ndhom", "mgharba",
+  "flous", "khedma", "lkhbar", "lqadia", "chi",
+  "matalan", "ya3ni", "khlass", "safi", "baraka",
+  "zid", "ziid", "3tini", "golha", "bghina",
 ]);
+
+const FRENCH_MARKERS = /\b(je|tu|il|elle|nous|vous|ils|elles|les|des|pour|avec|dans|sur|que|qui|est|sont|mais|ou|et|donc|car|ni|puis|comme|très|bien|bon|jour|merci|oui|non|pas|plus|aussi|encore|ici|maintenant|toujours|jamais|rien|tout|peu|beaucoup|entre|chez|sans|vers|après|avant|pendant|depuis|parce|quand|comment|pourquoi|combien|cette|cette|ces|mon|ton|son|notre|votre|leur|faire|avoir|être|aller|venir|voir|savoir|pouvoir|vouloir|devoir|falloir|dire|donner|prendre|mettre|trouver|passer|regarder|aimer|croire|demander|rester|répondre|entendre|penser|arriver|connaître|devenir|sentir|attendre|vivre|chercher|sortir|comprendre|porter|perdre|commencer)\b/i;
 
 function detectSegmentLanguage(text: string): string {
   const lower = text.toLowerCase();
-  const words = lower.split(/\s+/);
+  const words = lower.split(/\s+/).filter((w) => w.length > 1);
+  if (words.length === 0) return "other";
 
-  const hasDarija = words.some((w) => DARIJA_MARKERS.has(w));
+  const darijaCount = words.filter((w) => DARIJA_MARKERS.has(w)).length;
   const hasArabicScript = /[\u0600-\u06FF]/.test(text);
-  const hasFrench = /\b(je|tu|il|elle|nous|vous|ils|les|des|pour|avec|dans|sur|que|qui|est|sont|mais|ou|et|donc|car|ni|puis|comme|très|bien|bon|jour|merci)\b/i.test(text);
+  const frenchMatches = text.match(FRENCH_MARKERS);
+  const frenchCount = frenchMatches ? frenchMatches.length : 0;
 
-  if (hasDarija && hasFrench) return "mixed_darija_french";
-  if (hasDarija) return "darija";
-  if (hasArabicScript && hasFrench) return "mixed_arabic_french";
+  const darijaRatio = darijaCount / words.length;
+  const frenchRatio = frenchCount / words.length;
+
+  // Code-switching detection using ratios
+  if (darijaCount > 0 && frenchCount > 0) {
+    if (darijaRatio > 0.4) return "darija";
+    return "mixed_darija_french";
+  }
+  if (darijaCount > 0) return "darija";
+  if (hasArabicScript && frenchCount > 0) return "mixed_arabic_french";
   if (hasArabicScript) return "arabic";
-  if (hasFrench) return "french";
+  if (frenchRatio > 0.3) return "french";
   return "other";
 }
 
@@ -1602,7 +1652,7 @@ function validateAnalysisOutput(
   }
 
   // Calculate quality score
-  const qualityScore = calculateQualityScore(result);
+  const qualityScore = calculateQualityScore(result, expectedMinScenes);
   const hasCritical = issues.some((i) => i.startsWith("CRITICAL"));
 
   return {
@@ -1613,29 +1663,70 @@ function validateAnalysisOutput(
   };
 }
 
-function calculateQualityScore(result: GeneratedPromptPack): number {
+function calculateQualityScore(result: GeneratedPromptPack, expectedScenes: number): number {
   let score = 0;
+  const scenes = result.scenes ?? [];
 
-  // Scene completeness (40 points)
-  score += Math.min(40, (result.scenes?.length ?? 0) * 2);
+  // === Scene Coverage (25 pts) — proportional to expected count ===
+  const expected = Math.max(1, expectedScenes);
+  const coverageRatio = Math.min(1, scenes.length / expected);
+  score += Math.round(coverageRatio * 25);
 
-  // Prompt richness (30 points)
-  if (result.scenes && result.scenes.length > 0) {
-    const avgPromptWords = result.scenes.reduce(
-      (sum, s) => sum + (s.imagePrompt?.split(/\s+/).length ?? 0), 0,
-    ) / result.scenes.length;
-    score += Math.min(30, Math.floor(avgPromptWords / 3));
+  // === Prompt Quality (35 pts) — depth of image prompts ===
+  if (scenes.length > 0) {
+    const promptScores = scenes.map((scene) => {
+      let s = 0;
+      const prompt = (scene.imagePrompt ?? "").toLowerCase();
+      const wordCount = prompt.split(/\s+/).length;
+
+      // Word count (0-15 pts)
+      s += Math.min(15, Math.floor(wordCount / 8));
+
+      // Has environment description (0-5 pts)
+      if (/\b(indoor|outdoor|room|street|background|location|setting|environment|studio|house|city|wall|floor|table|desk)\b/.test(prompt)) s += 5;
+
+      // Has lighting description (0-5 pts)
+      if (/\b(light|lighting|shadow|bright|dark|warm|cool|sunlight|neon|ambient|glow|dim|illuminate|backlit|silhouette)\b/.test(prompt)) s += 5;
+
+      // Has camera/framing info (0-5 pts)
+      if (/\b(close-up|closeup|wide shot|medium shot|angle|perspective|zoom|bokeh|depth of field|bird.?s?.eye|overhead|low.?angle|tracking)\b/.test(prompt)) s += 5;
+
+      // Has character description (0-5 pts)
+      if (/\b(wearing|hair|skin|face|expression|eyes|mouth|hands|standing|sitting|looking|smiling|holding)\b/.test(prompt)) s += 5;
+
+      return Math.min(35, s);
+    });
+
+    score += Math.round(promptScores.reduce((a, b) => a + b, 0) / promptScores.length);
   }
 
-  // Metadata completeness (20 points)
-  if (result.characters && result.characters.length > 0) score += 10;
-  if (result.viralElements && result.viralElements.length > 0) score += 5;
-  if (result.moodProgression) score += 5;
+  // === Timestamp Accuracy (15 pts) ===
+  if (scenes.length > 0) {
+    const withTimestamps = scenes.filter((s) => s.timestampStart).length;
+    score += Math.round((withTimestamps / scenes.length) * 8);
 
-  // Timestamp accuracy (10 points)
-  if (result.scenes && result.scenes.length > 0) {
-    const hasAllTimestamps = result.scenes.every((s) => s.timestampStart);
-    if (hasAllTimestamps) score += 10;
+    let gapPenalty = 0;
+    for (let i = 1; i < scenes.length; i++) {
+      const prevEnd = parseTimestampToSeconds(scenes[i - 1].timestampEnd);
+      const currStart = parseTimestampToSeconds(scenes[i].timestampStart);
+      if (prevEnd !== null && currStart !== null && currStart - prevEnd > 3) gapPenalty++;
+    }
+    score += Math.max(0, 7 - gapPenalty);
+  }
+
+  // === Rich Metadata (15 pts) ===
+  if (result.characters && result.characters.length > 0) score += 5;
+  if (result.viralElements && result.viralElements.length > 0) score += 3;
+  if (result.moodProgression) score += 2;
+  if (result.colorGrading) score += 2;
+  if (result.contentCategory) score += 3;
+
+  // === Voiceover & Sound (10 pts) ===
+  if (scenes.length > 0) {
+    const withVoiceover = scenes.filter((s) => s.voiceover?.text && s.voiceover.text.length > 2).length;
+    const withSound = scenes.filter((s) => s.soundDesign?.music || (s.soundDesign?.sfx && s.soundDesign.sfx.length > 0)).length;
+    score += Math.round((withVoiceover / scenes.length) * 5);
+    score += Math.round((withSound / scenes.length) * 5);
   }
 
   return Math.min(100, score);
@@ -1647,6 +1738,54 @@ function parseTimestampToSeconds(ts: string | null | undefined): number | null {
   if (match) return parseInt(match[1]) * 60 + parseFloat(match[2]);
   const num = parseFloat(ts);
   return Number.isFinite(num) ? num : null;
+}
+
+function buildTargetedRetryPrompt(
+  originalResult: GeneratedPromptPack,
+  validationResult: ValidationResult,
+  sceneChangeTimestamps: number[],
+  videoDuration: number,
+): string {
+  // Find timestamps with no matching scene in the original result
+  const coveredRanges = originalResult.scenes.map((s) => ({
+    start: parseTimestampToSeconds(s.timestampStart) ?? 0,
+    end: parseTimestampToSeconds(s.timestampEnd) ?? 0,
+  }));
+
+  const missedTimestamps = sceneChangeTimestamps.filter(
+    (ts) => !coveredRanges.some((r) => ts >= r.start - 0.5 && ts <= r.end + 0.5),
+  );
+
+  // Find scenes with weak prompts (under 50 words)
+  const weakScenes = originalResult.scenes
+    .filter((s) => (s.imagePrompt ?? "").split(/\s+/).length < 50)
+    .map((s) => s.sceneNumber);
+
+  const parts = ["\n\n⚠️ ANALYSIS CORRECTION REQUIRED\n"];
+  parts.push("Your previous analysis had the following issues:");
+  parts.push(validationResult.issues.join("\n"));
+
+  if (missedTimestamps.length > 0) {
+    parts.push("\nMISSING SCENES — These timestamps had visual cuts but no scene was created:");
+    parts.push(missedTimestamps.map((ts) => `- ${ts.toFixed(1)}s`).join("\n"));
+    parts.push("You MUST add scene entries for each of these timestamps.");
+  }
+
+  if (weakScenes.length > 0) {
+    parts.push(`\nWEAK PROMPTS — Scenes ${weakScenes.join(", ")} have image prompts under 50 words (minimum 80 required).`);
+    parts.push("Expand each with: environment + character + lighting + camera framing.");
+  }
+
+  parts.push("\nINSTRUCTIONS:");
+  parts.push("1. Keep all existing correct scenes unchanged");
+  parts.push("2. ADD the missing scenes at the correct timestamps");
+  parts.push("3. EXPAND the weak scene prompts");
+  parts.push("4. Return the COMPLETE corrected JSON (all scenes, not just new/fixed ones)");
+  parts.push(`\nVideo duration: ${videoDuration.toFixed(1)}s`);
+  parts.push(`Expected minimum scenes: ${sceneChangeTimestamps.length}`);
+  parts.push("\nReturn ONLY valid JSON. No explanation text.");
+
+  return parts.join("\n");
 }
 
 function parseDataUrl(dataUrl: string) {
