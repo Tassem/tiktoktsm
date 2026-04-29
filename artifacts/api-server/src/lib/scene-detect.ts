@@ -14,20 +14,35 @@ export type EnrichedFrame = {
   base64: string;
 };
 
+export type SceneChange = {
+  timestamp: number;
+  type: "hard_cut" | "soft_transition";
+  confidence: number;
+};
+
+export type SceneDetectionResult = {
+  sceneChanges: SceneChange[];
+  sceneTimestamps: number[];
+  totalScenes: number;
+  averageSceneDuration: number;
+  detectionThresholdUsed: number;
+  durationSeconds: number;
+};
+
 /**
- * Detect scene-change timestamps from a video file using FFmpeg's scene filter.
- * Returns an array of timestamps (in seconds) where visual cuts occur.
+ * Run FFmpeg scene detection at a specific threshold.
+ * Returns raw timestamps and their scene scores.
  */
-async function detectSceneChanges(
+async function detectSceneChangesRaw(
   videoPath: string,
-  threshold = 0.3,
-): Promise<number[]> {
+  threshold: number,
+): Promise<{ timestamp: number; score: number }[]> {
   try {
     const { stderr } = await execFileAsync(
       "ffmpeg",
       [
         "-i", videoPath,
-        "-vf", `select='gt(scene,${threshold})',showinfo`,
+        "-vf", `select='gt(scene,${threshold})',metadata=print:file=-`,
         "-vsync", "vfr",
         "-f", "null",
         "-",
@@ -35,19 +50,104 @@ async function detectSceneChanges(
       { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 },
     );
 
-    const timestamps: number[] = [];
+    const results: { timestamp: number; score: number }[] = [];
     const ptsTimeRegex = /pts_time:([\d.]+)/g;
+    const scoreRegex = /lavfi\.scene_score=([\d.]+)/g;
+
+    const timestamps: number[] = [];
     let match: RegExpExecArray | null;
     while ((match = ptsTimeRegex.exec(stderr)) !== null) {
       const ts = parseFloat(match[1]);
-      if (Number.isFinite(ts)) {
-        timestamps.push(ts);
-      }
+      if (Number.isFinite(ts)) timestamps.push(ts);
     }
-    return timestamps;
+
+    const scores: number[] = [];
+    while ((match = scoreRegex.exec(stderr)) !== null) {
+      const s = parseFloat(match[1]);
+      if (Number.isFinite(s)) scores.push(s);
+    }
+
+    for (let i = 0; i < timestamps.length; i++) {
+      results.push({ timestamp: timestamps[i], score: scores[i] ?? threshold });
+    }
+    return results;
   } catch {
     return [];
   }
+}
+
+/**
+ * Adaptive dual-pass scene detection:
+ * Pass 1: high threshold (0.4) for hard cuts
+ * Pass 2: low threshold (0.2) for soft transitions
+ * Merge, deduplicate, and validate scene count.
+ */
+async function detectSceneChangesAdaptive(
+  videoPath: string,
+  durationSeconds: number,
+): Promise<{ changes: SceneChange[]; thresholdUsed: number }> {
+  // Pass 1: Hard cuts (high confidence)
+  const hardCuts = await detectSceneChangesRaw(videoPath, 0.4);
+
+  // Pass 2: Soft transitions (lower confidence)
+  const softTransitions = await detectSceneChangesRaw(videoPath, 0.2);
+
+  // Merge: hard cuts take priority, add soft transitions that aren't near hard cuts
+  const allChanges: SceneChange[] = [];
+
+  for (const hc of hardCuts) {
+    allChanges.push({ timestamp: hc.timestamp, type: "hard_cut", confidence: Math.min(hc.score, 1.0) });
+  }
+
+  for (const st of softTransitions) {
+    const tooClose = allChanges.some((c) => Math.abs(c.timestamp - st.timestamp) < 0.3);
+    if (!tooClose) {
+      allChanges.push({ timestamp: st.timestamp, type: "soft_transition", confidence: Math.min(st.score, 1.0) });
+    }
+  }
+
+  // Sort by timestamp
+  allChanges.sort((a, b) => a.timestamp - b.timestamp);
+
+  // Remove scene changes within 0.3s of each other (keep higher confidence)
+  const deduped: SceneChange[] = [];
+  for (const change of allChanges) {
+    const prev = deduped[deduped.length - 1];
+    if (prev && change.timestamp - prev.timestamp < 0.3) {
+      if (change.confidence > prev.confidence) {
+        deduped[deduped.length - 1] = change;
+      }
+    } else {
+      deduped.push(change);
+    }
+  }
+
+  // Scene count validation
+  const minExpected = Math.floor(durationSeconds / 5);
+  const maxExpected = Math.floor(durationSeconds * 3);
+  let thresholdUsed = 0.2;
+
+  if (deduped.length < minExpected && durationSeconds > 3) {
+    // Too few scenes — try ultra-low threshold
+    const ultraLow = await detectSceneChangesRaw(videoPath, 0.15);
+    for (const ul of ultraLow) {
+      const tooClose = deduped.some((c) => Math.abs(c.timestamp - ul.timestamp) < 0.3);
+      if (!tooClose) {
+        deduped.push({ timestamp: ul.timestamp, type: "soft_transition", confidence: Math.min(ul.score, 1.0) });
+      }
+    }
+    deduped.sort((a, b) => a.timestamp - b.timestamp);
+    thresholdUsed = 0.15;
+  } else if (deduped.length > maxExpected) {
+    // Too many scenes — keep only high-confidence ones
+    const filtered = deduped.filter((c) => c.confidence >= 0.4 || c.type === "hard_cut");
+    if (filtered.length >= minExpected) {
+      return { changes: filtered, thresholdUsed: 0.4 };
+    }
+    thresholdUsed = 0.4;
+  }
+
+  return { changes: deduped, thresholdUsed };
 }
 
 /**
@@ -264,11 +364,13 @@ export async function extractEnrichedFrames(videoDataUrl: string): Promise<{
   try {
     const durationSeconds = await getVideoDuration(videoPath);
 
-    // Run scene detection and generate interval timestamps in parallel
-    const [sceneTimestamps, intervalTimestamps] = await Promise.all([
-      detectSceneChanges(videoPath, 0.3),
+    // Run adaptive scene detection and generate interval timestamps in parallel
+    const [adaptiveResult, intervalTimestamps] = await Promise.all([
+      detectSceneChangesAdaptive(videoPath, durationSeconds),
       Promise.resolve(generateIntervalTimestamps(durationSeconds)),
     ]);
+
+    const sceneTimestamps = adaptiveResult.changes.map((c) => c.timestamp);
 
     // Merge and deduplicate
     const mergedTimestamps = mergeAndDedup(sceneTimestamps, intervalTimestamps);
@@ -306,22 +408,27 @@ export async function extractEnrichedFrames(videoDataUrl: string): Promise<{
 }
 
 /**
- * Merge server-side scene detection results with browser-extracted frames.
- * Used when the frontend sends pre-extracted frames along with the video.
+ * Full scene detection with adaptive thresholds, returning rich metadata.
  */
-export async function detectScenesFromVideo(videoDataUrl: string): Promise<{
-  sceneTimestamps: number[];
-  durationSeconds: number;
-}> {
+export async function detectScenesFromVideo(videoDataUrl: string): Promise<SceneDetectionResult> {
   const { videoPath, workDir, cleanup } = await writeVideoToTemp(videoDataUrl);
 
   try {
-    const [sceneTimestamps, durationSeconds] = await Promise.all([
-      detectSceneChanges(videoPath, 0.3),
-      getVideoDuration(videoPath),
-    ]);
+    const durationSeconds = await getVideoDuration(videoPath);
+    const adaptiveResult = await detectSceneChangesAdaptive(videoPath, durationSeconds);
 
-    return { sceneTimestamps, durationSeconds };
+    const sceneTimestamps = adaptiveResult.changes.map((c) => c.timestamp);
+    const totalScenes = sceneTimestamps.length + 1; // scenes = cuts + 1
+    const avgDuration = totalScenes > 0 ? durationSeconds / totalScenes : durationSeconds;
+
+    return {
+      sceneChanges: adaptiveResult.changes,
+      sceneTimestamps,
+      totalScenes,
+      averageSceneDuration: Math.round(avgDuration * 100) / 100,
+      detectionThresholdUsed: adaptiveResult.thresholdUsed,
+      durationSeconds,
+    };
   } finally {
     await cleanup();
   }

@@ -154,6 +154,9 @@ async function promptPackSummary(pack: PromptPack) {
     contentCategory: analysis?.contentCategory ?? null,
     viralElements: analysis?.viralElements ?? null,
     characters: analysis?.characters ?? null,
+    qualityScore: analysis?.qualityScore ?? null,
+    validationIssues: analysis?.validationIssues ?? null,
+    retryCount: analysis?.retryCount ?? null,
   };
 }
 
@@ -436,6 +439,9 @@ router.post("/analyses", async (req, res): Promise<void> => {
       contentCategory: generated.contentCategory ?? null,
       viralElements: generated.viralElements ?? null,
       characters: generated.characters ?? null,
+      qualityScore: generated.qualityScore ?? null,
+      validationIssues: generated.validationIssues ?? null,
+      retryCount: generated.retryCount ?? null,
     })
     .returning();
 
