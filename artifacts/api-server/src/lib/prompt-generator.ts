@@ -428,8 +428,14 @@ export async function buildAIVideoPromptPack(input: {
   const audioSegments = transcriptionResult.segments;
 
   // Dynamic frame cap based on scene count
+  // Some providers (e.g. NVIDIA NIM) limit images per request — cap accordingly
+  const isNvidiaProvider = baseUrl.includes("nvidia.com") || baseUrl.includes("nvidia.ai");
+  const providerImageLimit = isNvidiaProvider ? 8 : Infinity;
   const sceneCount = sceneDetection?.sceneTimestamps.length ?? 0;
-  const dynamicFrameCap = sceneCount <= 20 ? 40 : sceneCount <= 35 ? 60 : 80;
+  const dynamicFrameCap = Math.min(
+    sceneCount <= 20 ? 40 : sceneCount <= 35 ? 60 : 80,
+    providerImageLimit,
+  );
 
   // Smart frame selection: prioritize scene-change frames, fill gaps with interval frames
   const frameInputs = buildSmartFrameInputs(
