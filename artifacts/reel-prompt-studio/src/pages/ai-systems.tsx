@@ -21,23 +21,24 @@ const FALLBACK_MODELS = [
   { value: "claude-3-haiku-20240307", label: "Claude 3 Haiku" },
 ];
 
-type ProviderModel = { modelId: string; displayName: string | null };
+type ProviderModel = { modelId: string; label: string };
 type Provider = { id: number; name: string; type: string; models?: ProviderModel[] };
 
 function useConfiguredModels() {
   return useQuery<{ models: Array<{ value: string; label: string; group: string }> }>({
     queryKey: ["ai-provider-models-flat"],
     queryFn: async () => {
-      const res = await fetch("/api/ai-providers");
+      const res = await fetch("/api/ai-providers", { credentials: "include" });
       if (!res.ok) return { models: FALLBACK_MODELS.map((m) => ({ ...m, group: "النماذج المعتمدة" })) };
-      const providers: Provider[] = await res.json();
+      const data = await res.json() as { providers: Provider[] };
+      const providers = data.providers ?? [];
       const models: Array<{ value: string; label: string; group: string }> = [];
       for (const p of providers) {
         if (!p.models?.length) continue;
         for (const m of p.models) {
           models.push({
             value: m.modelId,
-            label: m.displayName ? `${m.displayName} (${m.modelId})` : m.modelId,
+            label: m.label ? `${m.label} (${m.modelId})` : m.modelId,
             group: p.name,
           });
         }
