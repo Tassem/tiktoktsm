@@ -129,6 +129,38 @@ async function resolveAiConfig(serviceName: string): Promise<{ baseUrl: string; 
   );
 }
 
+/**
+ * Resolve credentials for audio transcription (Whisper API).
+ * NVIDIA NIM and some providers don't support /audio/transcriptions,
+ * so we try multiple sources: env vars first (OpenAI), then any
+ * OpenAI/OpenRouter provider from the DB.
+ */
+async function resolveTranscriptionConfig(): Promise<{ baseUrl: string; apiKey: string } | null> {
+  // 1. Env vars (most likely OpenAI-compatible)
+  const envBase = process.env["AI_INTEGRATIONS_OPENAI_BASE_URL"];
+  const envKey = process.env["AI_INTEGRATIONS_OPENAI_API_KEY"];
+  if (envBase && envKey) return { baseUrl: envBase, apiKey: envKey };
+
+  // 2. Try to find an OpenAI or OpenRouter provider in DB (they support /audio/transcriptions)
+  try {
+    const { db, aiProvidersTable } = await import("@workspace/db");
+    const { asc, eq, or } = await import("drizzle-orm");
+    const providers = await db
+      .select({ baseUrl: aiProvidersTable.baseUrl, apiKey: aiProvidersTable.apiKey, type: aiProvidersTable.type })
+      .from(aiProvidersTable)
+      .where(or(eq(aiProvidersTable.type, "openrouter"), eq(aiProvidersTable.type, "custom")))
+      .orderBy(asc(aiProvidersTable.sortOrder));
+
+    for (const p of providers) {
+      if (p.apiKey && p.baseUrl && !p.baseUrl.includes("nvidia")) {
+        return { baseUrl: p.baseUrl, apiKey: p.apiKey };
+      }
+    }
+  } catch { /* DB query failed, skip */ }
+
+  return null;
+}
+
 export async function buildRemixPromptPack(input: {
   originalTitle: string;
   originalSummaryPrompt: string;
@@ -414,13 +446,18 @@ export async function buildAIVideoPromptPack(input: {
 }): Promise<GeneratedPromptPack> {
   const { baseUrl, apiKey, modelId: defaultModel } = await resolveAiConfig("video-analysis");
 
+  // Resolve transcription credentials separately — NVIDIA NIM doesn't support /audio/transcriptions
+  const transcriptionConfig = await resolveTranscriptionConfig();
+  const transcriptionBaseUrl = transcriptionConfig?.baseUrl ?? baseUrl;
+  const transcriptionApiKey = transcriptionConfig?.apiKey ?? apiKey;
+
   // Run scene detection and audio transcription in parallel when video data is available
   const [sceneDetection, transcriptionResult] = await Promise.all([
     input.videoDataUrl
       ? import("./scene-detect.js").then((m) => m.detectScenesFromVideo(input.videoDataUrl!)).catch(() => null)
       : Promise.resolve(null),
     input.videoDataUrl
-      ? transcribeVideoAudioWithSegments(input.videoDataUrl, baseUrl, apiKey).catch(() => ({ text: null, segments: [] }))
+      ? transcribeVideoAudioWithSegments(input.videoDataUrl, transcriptionBaseUrl, transcriptionApiKey).catch(() => ({ text: null, segments: [] }))
       : Promise.resolve({ text: null, segments: [] }),
   ]);
 
