@@ -115,11 +115,14 @@ const OPENROUTER_SUGGESTIONS = [
 
 // Popular NVIDIA NIM models to suggest
 const NVIDIA_SUGGESTIONS = [
+  // Vision models (support image/video analysis)
+  { modelId: "meta/llama-3.2-90b-vision-instruct", label: "Llama 3.2 90B Vision (Meta)", capabilities: "analysis,vision" },
+  { modelId: "meta/llama-3.2-11b-vision-instruct", label: "Llama 3.2 11B Vision (Meta)", capabilities: "analysis,vision" },
+  { modelId: "nvidia/cosmos-nemotron-34b", label: "Cosmos Nemotron 34B (NVIDIA)", capabilities: "analysis,vision" },
+  { modelId: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", label: "Nemotron Nano Omni 30B (NVIDIA)", capabilities: "analysis,vision" },
+  // Text-only models
   { modelId: "z-ai/glm-5.1", label: "GLM 5.1 (Z-AI)", capabilities: "analysis" },
   { modelId: "meta/llama-3.3-70b-instruct", label: "Llama 3.3 70B (Meta)", capabilities: "analysis" },
-  { modelId: "meta/llama-3.1-405b-instruct", label: "Llama 3.1 405B (Meta)", capabilities: "analysis" },
-  { modelId: "google/gemma-2-27b-it", label: "Gemma 2 27B (Google)", capabilities: "analysis" },
-  { modelId: "mistralai/mistral-large-2-instruct", label: "Mistral Large 2 (Mistral)", capabilities: "analysis" },
   { modelId: "nvidia/llama-3.1-nemotron-70b-instruct", label: "Nemotron 70B (NVIDIA)", capabilities: "analysis" },
   { modelId: "deepseek-ai/deepseek-r1", label: "DeepSeek R1 (DeepSeek)", capabilities: "analysis" },
 ];
