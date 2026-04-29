@@ -21,6 +21,7 @@ import {
   Lock,
   Wifi,
   WifiOff,
+  Cpu,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -48,7 +49,7 @@ type ProviderModel = {
 
 type Provider = {
   id: number;
-  type: "openrouter" | "custom";
+  type: "openrouter" | "custom" | "nvidia";
   name: string;
   baseUrl: string;
   apiKey: string;
@@ -112,6 +113,17 @@ const OPENROUTER_SUGGESTIONS = [
   { modelId: "mistralai/mistral-large", label: "Mistral Large", capabilities: "analysis" },
 ];
 
+// Popular NVIDIA NIM models to suggest
+const NVIDIA_SUGGESTIONS = [
+  { modelId: "z-ai/glm-5.1", label: "GLM 5.1 (Z-AI)", capabilities: "analysis" },
+  { modelId: "meta/llama-3.3-70b-instruct", label: "Llama 3.3 70B (Meta)", capabilities: "analysis" },
+  { modelId: "meta/llama-3.1-405b-instruct", label: "Llama 3.1 405B (Meta)", capabilities: "analysis" },
+  { modelId: "google/gemma-2-27b-it", label: "Gemma 2 27B (Google)", capabilities: "analysis" },
+  { modelId: "mistralai/mistral-large-2-instruct", label: "Mistral Large 2 (Mistral)", capabilities: "analysis" },
+  { modelId: "nvidia/llama-3.1-nemotron-70b-instruct", label: "Nemotron 70B (NVIDIA)", capabilities: "analysis" },
+  { modelId: "deepseek-ai/deepseek-r1", label: "DeepSeek R1 (DeepSeek)", capabilities: "analysis" },
+];
+
 const CAPABILITY_LABELS: Record<string, string> = {
   analysis: "تحليل النصوص",
   vision: "رؤية الصور/الفيديو",
@@ -127,7 +139,7 @@ function AddModelForm({
   onCancel,
 }: {
   providerId: number;
-  providerType: "openrouter" | "custom";
+  providerType: "openrouter" | "custom" | "nvidia";
   onAdded: () => void;
   onCancel: () => void;
 }) {
@@ -151,6 +163,8 @@ function AddModelForm({
     onError: (err) => toast({ title: "خطأ", description: err.message, variant: "destructive" }),
   });
 
+  const suggestions = providerType === "openrouter" ? OPENROUTER_SUGGESTIONS : providerType === "nvidia" ? NVIDIA_SUGGESTIONS : [];
+
   function applySuggestion(sug: typeof OPENROUTER_SUGGESTIONS[0]) {
     setModelId(sug.modelId);
     setLabel(sug.label);
@@ -160,11 +174,11 @@ function AddModelForm({
 
   return (
     <div className="border border-dashed border-border rounded-lg p-4 space-y-3 bg-muted/20">
-      {providerType === "openrouter" && (
+      {suggestions.length > 0 && (
         <div>
           <p className="text-xs text-muted-foreground mb-2 font-medium">اختر من الموديلات الشهيرة:</p>
           <div className="flex flex-wrap gap-1.5">
-            {OPENROUTER_SUGGESTIONS.map((sug) => (
+            {suggestions.map((sug) => (
               <button
                 key={sug.modelId}
                 onClick={() => applySuggestion(sug)}
@@ -185,7 +199,7 @@ function AddModelForm({
         <div className="space-y-1">
           <label className="text-xs font-medium text-muted-foreground">معرّف الموديل (Model ID)</label>
           <Input
-            placeholder={providerType === "openrouter" ? "openai/gpt-4o" : "gpt-4o"}
+            placeholder={providerType === "openrouter" ? "openai/gpt-4o" : providerType === "nvidia" ? "z-ai/glm-5.1" : "gpt-4o"}
             value={modelId}
             onChange={(e) => setModelId(e.target.value)}
             className="font-mono text-sm h-8"
@@ -523,7 +537,7 @@ function ProviderCard({ provider, onRefresh }: { provider: Provider; onRefresh: 
                   onCheckedChange={(v) => updateProvider.mutate({ isActive: v })}
                   className="scale-75"
                 />
-                {provider.type === "custom" && (
+                {(provider.type === "custom" || provider.type === "nvidia") && (
                   <Button
                     variant="ghost" size="sm" className="h-7 w-7 p-0"
                     title="اختبار الاتصال"
@@ -662,13 +676,15 @@ function AddProviderForm({
   onAdded,
   onCancel,
 }: {
-  type: "openrouter" | "custom";
+  type: "openrouter" | "custom" | "nvidia";
   onAdded: () => void;
   onCancel: () => void;
 }) {
   const { toast } = useToast();
-  const [name, setName] = useState(type === "openrouter" ? "OpenRouter" : "");
-  const [baseUrl, setBaseUrl] = useState(type === "openrouter" ? "https://openrouter.ai/api/v1" : "");
+  const defaultName = type === "openrouter" ? "OpenRouter" : type === "nvidia" ? "NVIDIA NIM" : "";
+  const defaultBaseUrl = type === "openrouter" ? "https://openrouter.ai/api/v1" : type === "nvidia" ? "https://integrate.api.nvidia.com/v1" : "";
+  const [name, setName] = useState(defaultName);
+  const [baseUrl, setBaseUrl] = useState(defaultBaseUrl);
   const [apiKey, setApiKey] = useState("");
 
   const addMutation = useMutation({
@@ -688,7 +704,7 @@ function AddProviderForm({
         <div className="space-y-1">
           <label className="text-xs font-medium">اسم المزود</label>
           <Input
-            placeholder={type === "openrouter" ? "OpenRouter" : "مزود مخصص"}
+            placeholder={type === "openrouter" ? "OpenRouter" : type === "nvidia" ? "NVIDIA NIM" : "مزود مخصص"}
             value={name}
             onChange={(e) => setName(e.target.value)}
             className="h-8 text-sm"
@@ -701,7 +717,7 @@ function AddProviderForm({
             value={baseUrl}
             onChange={(e) => setBaseUrl(e.target.value)}
             className="h-8 text-sm font-mono"
-            readOnly={type === "openrouter"}
+            readOnly={type === "openrouter" || type === "nvidia"}
           />
         </div>
       </div>
@@ -715,10 +731,17 @@ function AddProviderForm({
               احصل عليه من openrouter.ai/keys ↗
             </a>
           )}
+          {type === "nvidia" && (
+            <a href="https://build.nvidia.com/explore/discover" target="_blank" rel="noopener noreferrer"
+              className="text-primary hover:underline text-xs font-normal"
+            >
+              احصل عليه من build.nvidia.com ↗
+            </a>
+          )}
         </label>
         <Input
           type="password"
-          placeholder={type === "openrouter" ? "sk-or-v1-..." : "sk-..."}
+          placeholder={type === "openrouter" ? "sk-or-v1-..." : type === "nvidia" ? "nvapi-..." : "sk-..."}
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
           className="h-8 text-sm font-mono"
@@ -879,6 +902,7 @@ export default function Settings() {
   const isAdmin = true;
   const [bootstrapping, setBootstrapping] = useState(false);
   const [showAddOpenRouter, setShowAddOpenRouter] = useState(false);
+  const [showAddNvidia, setShowAddNvidia] = useState(false);
   const [showAddCustom, setShowAddCustom] = useState(false);
 
   async function handleBootstrap() {
@@ -913,6 +937,7 @@ export default function Settings() {
 
   const providers = providersQuery.data?.providers ?? [];
   const openRouterProviders = providers.filter((p) => p.type === "openrouter");
+  const nvidiaProviders = providers.filter((p) => p.type === "nvidia");
   const customProviders = providers.filter((p) => p.type === "custom");
   const services = assignmentsQuery.data?.services ?? [];
   const availableModels = assignmentsQuery.data?.availableModels ?? [];
@@ -1030,6 +1055,57 @@ export default function Settings() {
             ) : (
               <div className="space-y-3">
                 {openRouterProviders.map((p) => (
+                  <ProviderCard key={p.id} provider={p} onRefresh={refresh} />
+                ))}
+              </div>
+            )}
+          </section>
+
+          <Separator />
+
+          {/* ── NVIDIA NIM Section ── */}
+          <section className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold flex items-center gap-2">
+                  <Cpu className="size-5 text-green-500" />
+                  NVIDIA NIM
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  موديلات AI عالية الأداء عبر NVIDIA Inference Microservices
+                </p>
+              </div>
+              <Button variant="outline" size="sm" className="h-8 text-xs"
+                onClick={() => setShowAddNvidia(true)}
+              >
+                <Plus className="size-3 mr-1" /> إضافة NVIDIA
+              </Button>
+            </div>
+
+            {showAddNvidia && (
+              <AddProviderForm
+                type="nvidia"
+                onAdded={() => { setShowAddNvidia(false); refresh(); }}
+                onCancel={() => setShowAddNvidia(false)}
+              />
+            )}
+
+            {nvidiaProviders.length === 0 && !showAddNvidia ? (
+              <div className="border border-dashed border-border rounded-lg p-6 text-center text-sm text-muted-foreground">
+                <Cpu className="size-8 mx-auto mb-2 opacity-40" />
+                <p>لم تتم إضافة أي مزود NVIDIA بعد</p>
+                <p className="text-xs mt-1">
+                  احصل على مفتاحك من{" "}
+                  <a href="https://build.nvidia.com/explore/discover" target="_blank" rel="noopener noreferrer"
+                    className="text-primary hover:underline"
+                  >
+                    build.nvidia.com ↗
+                  </a>
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {nvidiaProviders.map((p) => (
                   <ProviderCard key={p.id} provider={p} onRefresh={refresh} />
                 ))}
               </div>

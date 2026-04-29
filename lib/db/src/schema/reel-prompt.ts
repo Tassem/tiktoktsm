@@ -139,7 +139,7 @@ export const siteSettingsTable = pgTable("site_settings", {
 
 export const aiProvidersTable = pgTable("ai_providers", {
   id: serial("id").primaryKey(),
-  type: text("type").notNull(), // 'openrouter' | 'custom'
+  type: text("type").notNull(), // 'openrouter' | 'custom' | 'nvidia'
   name: text("name").notNull(),
   baseUrl: text("base_url").notNull(),
   apiKey: text("api_key").notNull(),
