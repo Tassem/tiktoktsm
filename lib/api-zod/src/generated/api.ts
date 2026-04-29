@@ -203,6 +203,46 @@ export const GetPromptPackParams = zod.object({
   promptPackId: zod.coerce.number(),
 });
 
+const voiceoverDataSchema = zod.object({
+  text: zod.string().optional(),
+  language: zod.string().optional(),
+  speaker: zod.string().optional(),
+  emotion: zod.string().optional(),
+  deliveryNotes: zod.string().optional(),
+});
+
+const soundDesignDataSchema = zod.object({
+  music: zod.string().optional(),
+  sfx: zod.array(zod.string()).optional(),
+  ambient: zod.string().optional(),
+  transition: zod.string().optional(),
+});
+
+const cameraDataSchema = zod.object({
+  angle: zod.string().optional(),
+  movement: zod.string().optional(),
+  lensStyle: zod.string().optional(),
+});
+
+const textOverlayDataSchema = zod.object({
+  text: zod.string().optional(),
+  position: zod.string().optional(),
+  fontStyle: zod.string().optional(),
+  color: zod.string().optional(),
+  animation: zod.string().optional(),
+});
+
+const characterDataSchema = zod.object({
+  id: zod.string(),
+  description: zod.string(),
+  firstAppearance: zod.number().optional(),
+  appearances: zod.array(zod.number()).optional(),
+  clothingLog: zod.array(zod.object({
+    scenes: zod.array(zod.number()),
+    outfit: zod.string(),
+  })).optional(),
+});
+
 export const GetPromptPackResponse = zod
   .object({
     id: zod.number(),
@@ -215,6 +255,16 @@ export const GetPromptPackResponse = zod
     sceneCount: zod.number(),
     createdAt: zod.coerce.date(),
     sourceType: zod.enum(["original", "remix"]),
+    detectedLanguage: zod.string().nullable().optional(),
+    totalScenes: zod.number().nullable().optional(),
+    durationSeconds: zod.number().nullable().optional(),
+    aspectRatio: zod.string().nullable().optional(),
+    overallStyle: zod.string().nullable().optional(),
+    colorGrading: zod.string().nullable().optional(),
+    moodProgression: zod.string().nullable().optional(),
+    contentCategory: zod.string().nullable().optional(),
+    viralElements: zod.array(zod.string()).nullable().optional(),
+    characters: zod.array(characterDataSchema).nullable().optional(),
   })
   .and(
     zod.object({
@@ -223,13 +273,22 @@ export const GetPromptPackResponse = zod
           id: zod.number(),
           promptPackId: zod.number(),
           sceneNumber: zod.number(),
-          sceneType: zod.enum(["hook", "scene"]),
+          sceneType: zod.string(),
           title: zod.string(),
           imagePrompt: zod.string(),
           animationPrompt: zod.string(),
           voiceOverDarija: zod.string(),
           soundEffectsPrompt: zod.string(),
           sceneFrameUrl: zod.string().nullable().optional(),
+          timestampStart: zod.string().nullable().optional(),
+          timestampEnd: zod.string().nullable().optional(),
+          duration: zod.number().nullable().optional(),
+          mood: zod.string().nullable().optional(),
+          narrativePurpose: zod.string().nullable().optional(),
+          camera: cameraDataSchema.nullable().optional(),
+          voiceover: voiceoverDataSchema.nullable().optional(),
+          soundDesign: soundDesignDataSchema.nullable().optional(),
+          textOverlay: textOverlayDataSchema.nullable().optional(),
         }),
       ),
     }),
