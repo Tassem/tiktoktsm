@@ -1,4 +1,4 @@
-import { boolean, integer, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, integer, jsonb, pgTable, real, serial, text, timestamp } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -35,6 +35,16 @@ export const reelAnalysesTable = pgTable("reel_analyses", {
   summaryPrompt: text("summary_prompt").notNull(),
   providerMode: text("provider_mode").notNull().default("demo"),
   sourceType: text("source_type").notNull().default("original"),
+  detectedLanguage: text("detected_language"),
+  totalScenes: integer("total_scenes"),
+  durationSeconds: real("duration_seconds"),
+  aspectRatio: text("aspect_ratio"),
+  overallStyle: text("overall_style"),
+  colorGrading: text("color_grading"),
+  moodProgression: text("mood_progression"),
+  contentCategory: text("content_category"),
+  viralElements: jsonb("viral_elements"),
+  characters: jsonb("characters"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -61,6 +71,15 @@ export const scenePromptsTable = pgTable("scene_prompts", {
   soundEffectsPrompt: text("sound_effects_prompt").notNull(),
   sceneSummaryAr: text("scene_summary_ar"),
   sceneFrameUrl: text("scene_frame_url"),
+  timestampStart: text("timestamp_start"),
+  timestampEnd: text("timestamp_end"),
+  duration: real("duration"),
+  mood: text("mood"),
+  narrativePurpose: text("narrative_purpose"),
+  camera: jsonb("camera"),
+  voiceover: jsonb("voiceover"),
+  soundDesign: jsonb("sound_design"),
+  textOverlay: jsonb("text_overlay"),
 });
 
 export const frameSessionsTable = pgTable("frame_sessions", {

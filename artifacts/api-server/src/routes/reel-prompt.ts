@@ -127,7 +127,7 @@ async function promptPackSummary(pack: PromptPack) {
     .from(scenePromptsTable)
     .where(eq(scenePromptsTable.promptPackId, pack.id));
   const [analysis] = await db
-    .select({ summaryPrompt: reelAnalysesTable.summaryPrompt, sourceType: reelAnalysesTable.sourceType })
+    .select()
     .from(reelAnalysesTable)
     .where(eq(reelAnalysesTable.id, pack.analysisId));
 
@@ -144,6 +144,16 @@ async function promptPackSummary(pack: PromptPack) {
     sceneCount,
     createdAt: pack.createdAt,
     sourceType,
+    detectedLanguage: analysis?.detectedLanguage ?? null,
+    totalScenes: analysis?.totalScenes ?? null,
+    durationSeconds: analysis?.durationSeconds ?? null,
+    aspectRatio: analysis?.aspectRatio ?? null,
+    overallStyle: analysis?.overallStyle ?? null,
+    colorGrading: analysis?.colorGrading ?? null,
+    moodProgression: analysis?.moodProgression ?? null,
+    contentCategory: analysis?.contentCategory ?? null,
+    viralElements: analysis?.viralElements ?? null,
+    characters: analysis?.characters ?? null,
   };
 }
 
@@ -416,6 +426,16 @@ router.post("/analyses", async (req, res): Promise<void> => {
       status: "completed",
       summaryPrompt: generated.summaryPrompt,
       providerMode: usedProviderMode,
+      detectedLanguage: generated.detectedLanguage ?? null,
+      totalScenes: generated.totalScenes ?? null,
+      durationSeconds: generated.durationSeconds ?? null,
+      aspectRatio: generated.aspectRatio ?? null,
+      overallStyle: generated.overallStyle ?? null,
+      colorGrading: generated.colorGrading ?? null,
+      moodProgression: generated.moodProgression ?? null,
+      contentCategory: generated.contentCategory ?? null,
+      viralElements: generated.viralElements ?? null,
+      characters: generated.characters ?? null,
     })
     .returning();
 

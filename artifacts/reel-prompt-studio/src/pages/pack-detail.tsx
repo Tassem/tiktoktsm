@@ -20,6 +20,43 @@ import { useState, useCallback } from "react";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 
+type VoiceoverData = {
+  text?: string;
+  language?: string;
+  speaker?: string;
+  emotion?: string;
+  deliveryNotes?: string;
+};
+
+type SoundDesignData = {
+  music?: string;
+  sfx?: string[];
+  ambient?: string;
+  transition?: string;
+};
+
+type CameraData = {
+  angle?: string;
+  movement?: string;
+  lensStyle?: string;
+};
+
+type TextOverlayData = {
+  text?: string;
+  position?: string;
+  fontStyle?: string;
+  color?: string;
+  animation?: string;
+};
+
+type CharacterData = {
+  id: string;
+  description: string;
+  firstAppearance?: number;
+  appearances?: number[];
+  clothingLog?: Array<{ scenes: number[]; outfit: string }>;
+};
+
 type GetPromptPackScene = {
   id: number;
   sceneNumber: number;
@@ -30,6 +67,15 @@ type GetPromptPackScene = {
   voiceOverDarija: string;
   soundEffectsPrompt: string;
   sceneFrameUrl?: string | null;
+  timestampStart?: string | null;
+  timestampEnd?: string | null;
+  duration?: number | null;
+  mood?: string | null;
+  narrativePurpose?: string | null;
+  camera?: CameraData | null;
+  voiceover?: VoiceoverData | null;
+  soundDesign?: SoundDesignData | null;
+  textOverlay?: TextOverlayData | null;
 };
 
 type GetPromptPackResponse = {
@@ -40,6 +86,16 @@ type GetPromptPackResponse = {
   sceneCount: number;
   createdAt: string;
   summaryPrompt?: string | null;
+  detectedLanguage?: string | null;
+  totalScenes?: number | null;
+  durationSeconds?: number | null;
+  aspectRatio?: string | null;
+  overallStyle?: string | null;
+  colorGrading?: string | null;
+  moodProgression?: string | null;
+  contentCategory?: string | null;
+  viralElements?: string[] | null;
+  characters?: CharacterData[] | null;
   scenes: GetPromptPackScene[];
 };
 
@@ -195,6 +251,71 @@ export default function PackDetail() {
           </Button>
         </div>
         <p className="text-muted-foreground mt-2 text-lg">{typedPack.concept}</p>
+
+        {/* ── Video Metadata ── */}
+        {(typedPack.overallStyle || typedPack.contentCategory || typedPack.detectedLanguage || typedPack.aspectRatio || typedPack.durationSeconds) && (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {typedPack.overallStyle && (
+              <Badge variant="outline" className="text-xs"><Film className="size-3 mr-1 inline" />{typedPack.overallStyle}</Badge>
+            )}
+            {typedPack.contentCategory && (
+              <Badge variant="outline" className="text-xs">{typedPack.contentCategory}</Badge>
+            )}
+            {typedPack.detectedLanguage && (
+              <Badge variant="outline" className="text-xs">{typedPack.detectedLanguage}</Badge>
+            )}
+            {typedPack.aspectRatio && (
+              <Badge variant="outline" className="text-xs">{typedPack.aspectRatio}</Badge>
+            )}
+            {typedPack.durationSeconds != null && (
+              <Badge variant="outline" className="text-xs">{Math.round(typedPack.durationSeconds)}s</Badge>
+            )}
+            {typedPack.colorGrading && (
+              <Badge variant="outline" className="text-xs text-amber-600">{typedPack.colorGrading}</Badge>
+            )}
+          </div>
+        )}
+
+        {/* ── Viral Elements ── */}
+        {typedPack.viralElements && typedPack.viralElements.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {typedPack.viralElements.map((el, i) => (
+              <Badge key={i} className="bg-rose-500/10 text-rose-600 hover:bg-rose-500/20 text-[10px] uppercase tracking-wider">{el}</Badge>
+            ))}
+          </div>
+        )}
+
+        {/* ── Mood Progression ── */}
+        {typedPack.moodProgression && (
+          <p className="mt-2 text-xs text-muted-foreground italic">{typedPack.moodProgression}</p>
+        )}
+
+        {/* ── Character Registry ── */}
+        {typedPack.characters && typedPack.characters.length > 0 && (
+          <div className="mt-4 border border-border/50 rounded-lg p-3 bg-muted/10">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Character Registry</p>
+            <div className="space-y-2">
+              {typedPack.characters.map((char) => (
+                <div key={char.id} className="text-xs space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary" className="text-[10px] font-mono">{char.id}</Badge>
+                    <span className="text-muted-foreground">Scenes: {char.appearances?.join(", ") || "—"}</span>
+                  </div>
+                  <p className="text-foreground/80 leading-relaxed">{char.description}</p>
+                  {char.clothingLog && char.clothingLog.length > 1 && (
+                    <div className="pl-3 border-l-2 border-border/30 mt-1 space-y-0.5">
+                      {char.clothingLog.map((log, i) => (
+                        <p key={i} className="text-muted-foreground text-[10px]">
+                          Scenes [{log.scenes.join(",")}]: {log.outfit}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <Dialog
@@ -444,6 +565,59 @@ function SceneCard({
                 <span className="text-xs text-muted-foreground font-medium">Scene {scene.sceneNumber}</span>
               </div>
               <h3 className="font-bold text-base leading-snug mb-2">{scene.title}</h3>
+
+              {/* ── Scene Metadata Badges ── */}
+              {(scene.timestampStart || scene.mood || scene.duration != null || scene.narrativePurpose) && (
+                <div className="flex flex-wrap gap-1 mb-2">
+                  {scene.timestampStart && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 font-mono">
+                      {scene.timestampStart}{scene.timestampEnd ? ` → ${scene.timestampEnd}` : ""}
+                    </span>
+                  )}
+                  {scene.duration != null && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{scene.duration.toFixed(1)}s</span>
+                  )}
+                  {scene.mood && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-600">{scene.mood}</span>
+                  )}
+                  {scene.narrativePurpose && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600">{scene.narrativePurpose}</span>
+                  )}
+                </div>
+              )}
+
+              {/* ── Camera & Text Overlay Info ── */}
+              {(scene.camera || scene.textOverlay) && (
+                <div className="flex flex-wrap gap-1 mb-2">
+                  {scene.camera?.angle && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-600">{scene.camera.angle}</span>
+                  )}
+                  {scene.camera?.movement && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-600">{scene.camera.movement}</span>
+                  )}
+                  {scene.textOverlay?.text && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600" title={`Font: ${scene.textOverlay.fontStyle || "—"} | Pos: ${scene.textOverlay.position || "—"}`}>
+                      📝 {scene.textOverlay.text}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* ── Voiceover Metadata ── */}
+              {scene.voiceover && (scene.voiceover.speaker || scene.voiceover.emotion) && (
+                <div className="flex flex-wrap gap-1 mb-2">
+                  {scene.voiceover.speaker && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-pink-500/10 text-pink-600 font-mono">{scene.voiceover.speaker}</span>
+                  )}
+                  {scene.voiceover.emotion && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-pink-500/10 text-pink-600">{scene.voiceover.emotion}</span>
+                  )}
+                  {scene.voiceover.language && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{scene.voiceover.language}</span>
+                  )}
+                </div>
+              )}
+
               {sceneSummary && (
                 <div className="flex items-start gap-1.5 mb-2" dir="rtl">
                   <FileText className="size-3.5 text-amber-500 shrink-0 mt-0.5" />

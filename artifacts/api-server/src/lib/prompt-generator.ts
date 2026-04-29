@@ -9,21 +9,77 @@ import { getServiceModel } from "../routes/ai-providers";
 
 const execFileAsync = promisify(execFile);
 
+type VoiceoverData = {
+  text: string;
+  language?: string;
+  speaker?: string;
+  emotion?: string;
+  deliveryNotes?: string;
+};
+
+type SoundDesignData = {
+  music?: string;
+  sfx?: string[];
+  ambient?: string;
+  transition?: string;
+};
+
+type CameraData = {
+  angle?: string;
+  movement?: string;
+  lensStyle?: string;
+};
+
+type TextOverlayData = {
+  text?: string;
+  position?: string;
+  fontStyle?: string;
+  color?: string;
+  animation?: string;
+};
+
+type CharacterData = {
+  id: string;
+  description: string;
+  firstAppearance?: number;
+  appearances?: number[];
+  clothingLog?: Array<{ scenes: number[]; outfit: string }>;
+};
+
 type GeneratedScene = {
   sceneNumber: number;
-  sceneType: "hook" | "scene";
+  sceneType: string;
   title: string;
   imagePrompt: string;
   animationPrompt: string;
   voiceOverDarija: string;
   soundEffectsPrompt: string;
   sceneFrameUrl?: string | null;
+  timestampStart?: string | null;
+  timestampEnd?: string | null;
+  duration?: number | null;
+  mood?: string | null;
+  narrativePurpose?: string | null;
+  camera?: CameraData | null;
+  voiceover?: VoiceoverData | null;
+  soundDesign?: SoundDesignData | null;
+  textOverlay?: TextOverlayData | null;
 };
 
 type GeneratedPromptPack = {
   summaryPrompt: string;
   title: string;
   scenes: GeneratedScene[];
+  detectedLanguage?: string | null;
+  totalScenes?: number | null;
+  durationSeconds?: number | null;
+  aspectRatio?: string | null;
+  overallStyle?: string | null;
+  colorGrading?: string | null;
+  moodProgression?: string | null;
+  contentCategory?: string | null;
+  viralElements?: string[] | null;
+  characters?: CharacterData[] | null;
 };
 
 const darijaLines = [
@@ -372,7 +428,7 @@ export async function buildAIVideoPromptPack(input: {
     : "";
   const sendAnalysisRequest = (frames: ReturnType<typeof buildFrameInputs>, retryNote = "") => {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000); // 5-min hard timeout
+    const timeoutId = setTimeout(() => controller.abort(), 8 * 60 * 1000); // 8-min hard timeout for deeper analysis
     return fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
       signal: controller.signal,
@@ -382,9 +438,6 @@ export async function buildAIVideoPromptPack(input: {
       },
       body: JSON.stringify({
         model: input.modelOverride?.trim() || defaultModel,
-        // Use response_format: json_object only when the system prompt is single-stage ("Return strict JSON only").
-        // If the custom system prompt uses a two-stage approach with "---JSON-OUTPUT-BELOW---", skip it
-        // to allow Stage 1 markdown + separator + Stage 2 JSON (our parser handles both cases).
         ...((input.systemPromptOverride ?? "").match(/JSON.OUTPUT.BELOW/i)
           ? {}
           : { response_format: { type: "json_object" } }),
@@ -392,146 +445,241 @@ export async function buildAIVideoPromptPack(input: {
           {
             role: "system",
             content: input.systemPromptOverride ??
-              "You are an elite video-to-prompt engineer. Your output is fed directly into AI video generators (Kling, Sora, Runway, Pika). Every prompt you write must be copy-ready with zero ambiguity: a video generator reading your prompt must produce the exact same scene without needing to see the original video. Your most critical responsibility is CHARACTER IDENTITY LOCKING: each character is a fixed entity with a unique visual anchor (gender, size, color, clothing, position). When you assign dialogue, the label before the colon IS a hard lock — only that character's mouth moves for that line, no other character speaks it. Dialogue swapping between husband/wife, father/mother, or any two characters is a fatal error. Write with surgical precision. Return strict JSON only.",
+              `You are an elite video-to-prompt forensic engineer. Your output is fed directly into AI video generators (Kling, Sora, Runway, Pika). Every prompt you write must be copy-ready with zero ambiguity: a video generator reading your prompt must produce the exact same scene without seeing the original video.
+
+Your analysis follows 4 PHASES in strict order:
+1. SCENE DETECTION — identify every distinct scene/shot
+2. DEEP ANALYSIS — forensic-level detail per scene
+3. CHARACTER IDENTITY LOCK — build a character registry with consistent descriptions
+4. GLOBAL VIDEO METADATA — overall video properties
+
+Return strict JSON only.`,
           },
           {
             role: "user",
             content: [
               {
                 type: "text",
-                text: `Analyze every sampled frame from this video and convert the complete video into a professional, copy-ready production brief. These frames are sampled across the full video duration — use them to reconstruct the full visible flow from beginning to end.
+                text: `Analyze every sampled frame from this video and produce a COMPLETE, FORENSIC-LEVEL analysis of EVERY scene. These frames are sampled across the full video — use them to reconstruct the full visible flow from beginning to end.
 
-═══════════════════════════════════
-ABSOLUTE RULES — NEVER BREAK THESE
-═══════════════════════════════════
-1. CHARACTER IDENTITY LOCK — FORENSIC PRECISION REQUIRED
-   - On first appearance of each character, extract and lock their COMPLETE physical anchor from the frames. Every single visible attribute must be captured.
-   - Repeat this FULL physical anchor in EVERY imagePrompt where that character appears — copy it verbatim, never abbreviate.
-   - NEVER use vague pronouns like "the character", "the person", "the man", "the woman". Always use the full role label + full description.
-   - HAIR LOCK (mandatory — missing hair detail = FAILED prompt):
-     • Exact color: use precise names (jet-black, chestnut brown, honey blonde, platinum white, deep auburn, dark brown with highlights, silver-grey — NOT just "black hair" or "brown hair")
-     • Length: buzzcut / cropped / ear-length / chin-length / shoulder-length / mid-back / waist-length / shaved-sides with longer top
-     • Style/texture: bone-straight / wavy / loose curls / tight coils / afro / braided / tied-back ponytail / messy bun / slicked-back / side-parted
-     • Any notable features: hairline shape, bangs, highlights, visible roots
-     • For STYLIZED characters (fruit/plant-based): describe the organic material forming the hair (e.g., "crown of deep-green strawberry leaves arranged in a fan shape", "cluster of red maple leaves pinned on top", "smooth bare fruit head with no leaf crown")
-   - FACE DESIGN LOCK (mandatory — missing face details = FAILED prompt):
-     • EYES: exact color (dark brown, hazel, amber, green, black, light brown), shape (large round anime-style / almond / narrow), size relative to face (large/medium/small), eyelash style (thick/thin/none), any shine or highlight on pupils
-     • NOSE: shape (small button / rounded / pointed / flat / broad), size relative to face
-     • MOUTH/LIPS: shape (thin / full / small / wide), lip color, expression (neutral / smiling / open / pursed)
-     • EYEBROWS: thickness (thick/thin/arched), color, shape
-     • FACE SHAPE: round / oval / square / heart-shaped / elongated
-     • DISTINGUISHING MARKS (critical — do NOT skip if visible): any scars (location on face + shape + color), moles or beauty marks (exact position: left cheek / upper lip / etc.), freckles, birthmarks, bruises, cuts, or any other permanent or temporary mark on skin
-     • For STYLIZED/ANIMATED characters: describe face surface (smooth glossy skin / clay matte / plastic sheen), whether eyes are painted on or 3D raised, any texture on cheeks
-   - SKIN TONE LOCK: Use precise descriptors — fair/ivory, light beige, warm olive, medium tan, golden brown, caramel, warm brown, dark brown, deep ebony. Never just "light" or "dark".
-   - CLOTHING LOCK: Never write "blue shirt". Write "slim-fit navy-blue cotton polo shirt with white stitching on the collar". Include: exact color name, garment type, fit (loose/fitted/oversized/cropped), visible pattern or texture, any logos/prints.
-   - BODY PROPORTION LOCK: Height relative to other characters (taller by a head, same height, shorter), body build (slender/slim/athletic/stocky/petite/tall and lean), any notable posture.
-   - ACCESSORIES AND BODY ATTACHMENTS LOCK (mandatory — do NOT skip if visible): Any object physically on/attached to the character's body — jewelry (earrings: type+size+material+color, necklaces, rings, bracelets), glasses/sunglasses (frame color+shape), hats/headwear (type+color+material), bags/backpacks (color+style), any decorative body items. For stylized/animated characters: attached organic elements (leaf crown, petals, vines, fruit stems). State the exact attachment point and condition.
-   - DIALOGUE SPEAKER LOCK: The character name/role before the colon in voiceOverDarija is the ONLY character who speaks that line. Only that character's mouth moves. All others: mouths fully closed. This is non-negotiable.
-   - NEVER swap dialogue between any two characters.
-   - SPECIES LOCK: A character's fruit/species type is determined by their FAMILY LINEAGE, not by other characters' names. Explicitly label each character's species in every imagePrompt.
+══════════════════════════════════════════
+PHASE 1: SCENE DETECTION — FIND EVERY SCENE
+══════════════════════════════════════════
+Before writing any prompts, FIRST identify EVERY distinct scene/shot:
 
-1B. CHARACTER STATE CONTINUITY — TRACK CHANGES ACROSS SCENES
-   ⚠️ THIS IS A CRITICAL RULE — BREAKING IT CAUSES DIRECT IMAGE INCONSISTENCY
-   - Before writing scenes, mentally track a "STATE LOG" for each character:
-     • Starting state: their full appearance at first appearance
-     • Each time an event physically changes a character (removes hair/leaves, adds injury, changes outfit, cuts hair, removes an accessory), LOG that change
-   - From the scene AFTER the change occurs: ALL imagePrompts must show the POST-CHANGE state
-   - NEVER show an attribute that was explicitly removed in a previous scene
-   - Examples of mandatory state tracking:
-     • "Husband removes Frizita's leaf crown with clippers in Scene 1" → Scene 2, 3, 4... must describe Frizita WITHOUT any leaf crown — write "bare smooth strawberry head, no leaves, freshly clipped top"
-     • "Character removes jacket in Scene 2" → Scene 3+ must show character without jacket
-     • "Character gets injured in Scene 2" → Scene 3+ shows the wound/bandage
-   - In every imagePrompt after a change, explicitly state what was removed/changed: e.g., "NOTE: leaf crown removed — head is now bare and smooth with no leaves"
+1. A "new scene" is defined as ANY of these changes:
+   - Camera angle change
+   - Location/background change
+   - New character appearing
+   - Significant lighting change
+   - Text overlay appearing/changing
+   - Time skip (indicated by visual change)
+   - Transition effect (fade, cut, zoom)
 
-2. IMAGE PROMPT COMPLETENESS — NO DETAIL SKIPPING ALLOWED
-   - Every imagePrompt must be 100% self-contained for an external image generator. Do not reference "the style section", "as described above", or "same as previous scene".
-   - MANDATORY CHECKLIST — every imagePrompt MUST explicitly include ALL of these:
-     ✓ Vertical 9:16 aspect ratio
-     ✓ Visual art style (realistic / 3D animated / 2D flat / painterly / etc.)
-     ✓ EVERY character's FULL anchor:
-       – Hair: color+length+style (or leaf/plant description for stylized)
-       – Face: eye color+shape, nose shape, mouth/lip color+shape, eyebrows, face shape
-       – DISTINGUISHING MARKS: scars (location+color+shape), moles, birthmarks, freckles — write "none visible" if absent, never skip
-       – Skin tone with undertone
-       – Clothing: exact color name+garment+fit+pattern
-       – ACCESSORIES: all jewelry, glasses, hats, bags — write "no accessories" if none
-       – Height/build relative to others
-       – Position in frame
-       – CHARACTER STATE: note any changes from previous scenes (e.g., "leaf crown REMOVED — bare head")
-     ✓ Exact environment: room type, wall color/texture, floor material, furniture style, lighting source, time of day
-     ✓ Camera framing: close-up / medium shot / wide shot
-     ✓ Camera angle: eye-level / low angle / high angle / overhead
-     ✓ Lighting: direction (front-lit / side-lit / back-lit), quality (soft/hard), color temperature (warm/cool/neutral)
-     ✓ Color palette: 3-4 dominant hues, saturation level, contrast
-     ✓ Mood and atmosphere (tense, warm, melancholy, joyful, etc.)
-     ✓ Key props with exact position
-   - For animated/stylized characters: describe head shape (fruit/vegetable type + size), body material (clay / smooth 3D plastic / glossy resin), FULL face design (painted vs 3D raised eyes, eye size, lid style, pupil highlight), scale ratio between characters.
-   - ⚠️ MINIMUM 150 words per imagePrompt. Any prompt under 150 words is considered INCOMPLETE. Be surgically precise.
-   - ⚠️ ZERO vague sentences allowed: "wearing colorful clothes" = INVALID. "wearing a bright coral-red oversized hoodie with a small white logo on the chest" = VALID.
+2. Number each scene sequentially.
 
-3. ANIMATION PROMPT COMPLETENESS
-   - Every animationPrompt must include: exact subject movement path, facial expression evolution, body gesture sequence, camera movement type+speed+direction, shot duration estimate, transition type into next scene, and emotional arc.
-   - SPEAKER BLOCKING SECTION (mandatory when dialogue exists): list each dialogue line with its speaker and describe exactly: who moves their mouth, what their body does while speaking, what the OTHER characters do (silent reaction only — closed mouth, eyes listening, subtle nod/expression), and an explicit warning like "⚠️ ONLY [Speaker Name] speaks this line — all other characters keep mouths fully closed."
-   - ⚠️ MINIMUM 120 WORDS per animationPrompt. Under 120 = INCOMPLETE.
+3. Map each scene to its timestamp range (start → end) using the frame timestamps provided.
 
-4. DIALOGUE ACCURACY
-   - Use the audio transcript as primary source. Preserve every distinct speaker turn.
-   - voiceOverDarija must be a labeled block, one line per speaker turn, separated by \\n.
-   - Format: SpeakerRole: "line in Moroccan Darija"
-   - Use precise role labels that match the visual anchor: e.g. "Strawberry Mother", "Banana Father", "Red Daughter", "Husband", "Wife" — not generic "Character 1."
-   - Write dialogue in natural Moroccan Darija (Arabic script preferred). Keep proper names in Latin if heard.
-   - If transcript has multiple turns in one scene, preserve ALL turns. Do not collapse multi-speaker dialogue into one line.
+4. ⚠️ Do NOT skip ANY scene, no matter how short — even 0.5-second scenes MUST be captured.
 
-5. SCENE COUNT AND FLOW
-   - Do not force a fixed scene count. Let the visible video content decide.
-   - Scene 1 = the visual hook (most scroll-stopping moment).
-   - Split scenes when: new location, new character enters, emotional beat shifts, camera cut changes composition significantly.
-   - Merge only if the action is fully continuous with no meaningful visual change.
+══════════════════════════════════════════
+PHASE 2: DEEP ANALYSIS PER SCENE
+══════════════════════════════════════════
+For EACH detected scene, provide ALL of the following:
 
-6. SOUND PROMPT COMPLETENESS
-   - Include: background ambience description, music genre+tempo+mood, specific sound effect moments (footstep timing, impact hits, whoosh transitions), volume relationship between music and dialogue, and any diegetic sounds from visible actions.
+**A. Image Prompt (Forensic Detail — MIN 150 WORDS)**
+Write a complete, self-contained AI image generation prompt covering:
+- **Environment:** Exact location, time of day, weather, indoor/outdoor, architectural details, wall color/texture, floor material, furniture
+- **Characters:** Full physical description for EVERY character:
+  • HAIR: exact color (jet-black/chestnut brown/honey blonde — NOT just "black"), length (buzzcut/shoulder-length/waist-length), style (straight/wavy/curls/braided/ponytail)
+  • FACE: eye color+shape+size, nose shape, mouth/lip shape+color, eyebrows, face shape, distinguishing marks (scars/moles/freckles — write "none visible" if absent)
+  • SKIN TONE: precise descriptor (fair ivory/warm olive/medium tan/golden brown/caramel/deep ebony)
+  • BODY: height relative to others, build (slender/athletic/stocky), posture
+  • For STYLIZED characters: head shape (fruit/vegetable type), body material (clay/glossy resin/plastic), face surface
+- **Clothing:** Exact outfit — color name, garment type, fit (loose/fitted/oversized), pattern, texture, logos. Never "blue shirt" — write "slim-fit navy-blue cotton polo shirt with white stitching on collar"
+- **Accessories:** Every piece of jewelry, glasses, hats, bags with attachment point — write "no accessories" if none
+- **Pose & Expression:** Body position, hand placement, facial expression, eye direction, mouth state
+- **Objects:** Every visible object with exact position
+- **Framing:** Camera angle (close-up/medium/wide/bird's eye), lens style, depth of field
+- **Lighting:** Direction, color temperature, shadows, highlights, ambient vs direct
+- **Color Palette:** 3-4 dominant hues, color grading style, saturation, contrast
+- **Text/Graphics:** Any on-screen text with font style, position, color, language
+- ⚠️ Every imagePrompt must be 100% SELF-CONTAINED. Never reference "as described above" or "same as previous".
+- ⚠️ ZERO vague sentences. "wearing colorful clothes" = INVALID.
+
+**B. Animation/Motion Prompt (MIN 120 WORDS)**
+- Camera movement (pan, tilt, zoom, static, tracking, speed)
+- Character movement path, facial expression evolution, body gestures
+- Object movement
+- Speed (slow motion, normal, fast, time-lapse)
+- Shot duration estimate
+- Transition to next scene (cut, fade, dissolve, wipe)
+- Emotional arc of the scene
+- SPEAKER BLOCKING (when dialogue): for each line, name who speaks, describe mouth movement, and ⚠️ explicitly confirm all other characters keep mouths CLOSED
+
+**C. Voice-Over Script**
+Provide as a structured voiceover object:
+- Exact transcription of speech (Moroccan Darija in Arabic script preferred)
+- Language identification (darija/arabic/french/english/mixed)
+- Speaker ID (use character registry IDs, e.g. "CHAR_01")
+- Emotional tone (excited/calm/angry/funny/sarcastic)
+- Delivery notes (fast-paced/slow/whispered/shouted)
+- If no speech: describe silence or ambient sound
+
+**D. Sound Design**
+Provide as a structured object:
+- Background music (genre, tempo, mood, instruments)
+- Sound effects list (footsteps, impacts, whooshes)
+- Ambient sounds (wind, traffic, crowd)
+- Audio transition to next scene
+- Volume dynamics
+
+**E. Scene Metadata**
+- Scene number
+- Timestamp: start → end (e.g., "00:00.000" → "00:02.500")
+- Duration in seconds
+- Scene type: hook | establishing | dialogue | action | transition | text-overlay | montage | reaction | CTA
+- Mood/emotion
+- Narrative purpose (setup/conflict/climax/resolution/hook/CTA)
+- Camera object: angle, movement, lens style
+- Text overlay object (if any on-screen text): text, position, font style, color, animation
+
+══════════════════════════════════════════
+PHASE 3: CHARACTER IDENTITY LOCK
+══════════════════════════════════════════
+After analyzing all scenes, build a CHARACTER REGISTRY in the "characters" array:
+- For each unique character/person:
+  • Character ID (e.g., "CHAR_01")
+  • Full forensic description (MUST be consistent across all scenes)
+  • First appearance (scene number)
+  • All appearances (list of scene numbers)
+  • Clothing changes across scenes (document each outfit change with scene numbers)
+
+CHARACTER STATE CONTINUITY:
+- Track a "STATE LOG" for each character across scenes
+- When an event changes a character (removes accessory, changes outfit, gets injured), ALL subsequent imagePrompts must reflect the POST-CHANGE state
+- Explicitly note removals: "NOTE: leaf crown removed — head is now bare"
+
+DIALOGUE SPEAKER LOCK:
+- The character ID before the colon in voiceover is the ONLY character whose mouth moves
+- All others: mouths fully closed. This is NON-NEGOTIABLE
+- Never swap dialogue between characters
+
+══════════════════════════════════════════
+PHASE 4: GLOBAL VIDEO METADATA
+══════════════════════════════════════════
+Provide these top-level fields:
+- detected_language: primary language (darija/arabic/french/english/mixed)
+- total_scenes: count of all detected scenes
+- duration_seconds: estimated total video duration
+- aspect_ratio: (9:16, 16:9, 1:1)
+- overall_style: visual style (cinematic/vlog/meme/tutorial/aesthetic/animated)
+- color_grading: color grading description
+- mood_progression: how mood evolves through the video
+- content_category: niche/category of content
+- viral_elements: array of identified viral elements (hook/pattern_interrupt/CTA/emotional_trigger/curiosity_gap)
 
 ═══════════════════
 WHAT TO IGNORE
 ═══════════════════
-- Do not let niche metadata change the video content you describe.
-- Do not mention file names or source names.
-- Do not invent details not visible or audible in the frames/transcript.
-- Do not write generic marketing copy or productivity scenes unrelated to the actual video.
+- Do not let niche metadata override what is actually visible in frames
+- Do not mention file names or source names
+- Do not invent details not visible or audible
+- Do not write generic descriptions unrelated to the actual video
 
 ═══════════════════
 ADDITIONAL CONTEXT
 ═══════════════════
-- User notes (extra context only, does not override frames): ${input.reelNotes}
+- User notes: ${input.reelNotes}
 - Audio transcript: ${audioTranscript || "No usable speech transcript was extracted. Describe background sound from visual context only and do not claim exact spoken lines."}${sceneChangeInfo}${frameTimingInfo}
 ${retryNote}
 
 ═══════════════════
-OUTPUT FORMAT
+OUTPUT FORMAT (JSON)
 ═══════════════════
-Return JSON with exactly these keys:
+Return JSON with exactly this structure:
 
 {
   "title": "short precise title describing the actual visible video content",
-  "summaryPrompt": "markdown with two sections: ### Style and ### Cinematography. Style: bullet points for **Visual Texture** (surface quality, rendering style, grain/smoothness), **Lighting Quality** (soft/hard, direction, color temp), **Color Palette** (dominant hues, saturation, contrast level), **Atmosphere** (emotional feel, time of day, environmental mood). Cinematography: bullet points for **Camera** (movement type, speed, axis), **Lens** (focal length feel, depth of field), **Lighting Setup** (key/fill/rim placement), **Mood** (visual emotion, pacing). Every bullet must be a concrete technical description, not a vague generic sentence.",
+  "detected_language": "darija|arabic|french|english|mixed",
+  "total_scenes": <number>,
+  "duration_seconds": <number>,
+  "aspect_ratio": "9:16",
+  "overall_style": "...",
+  "color_grading": "...",
+  "mood_progression": "...",
+  "content_category": "...",
+  "viral_elements": ["hook", "pattern_interrupt", "CTA"],
+
+  "characters": [
+    {
+      "id": "CHAR_01",
+      "description": "full forensic physical description",
+      "first_appearance": 1,
+      "appearances": [1, 3, 5],
+      "clothing_log": [
+        {"scenes": [1, 3], "outfit": "exact outfit description"},
+        {"scenes": [5], "outfit": "changed outfit description"}
+      ]
+    }
+  ],
+
+  "summaryPrompt": "markdown with ### Style and ### Cinematography sections. Style: **Visual Texture**, **Lighting Quality**, **Color Palette**, **Atmosphere**. Cinematography: **Camera**, **Lens**, **Lighting Setup**, **Mood**. Every bullet = concrete technical description.",
+
   "scenes": [
     {
-      "title": "precise description of this specific visible beat",
-      "imagePrompt": "SELF-CONTAINED copy-ready English image-generation prompt (MIN 150 WORDS — shorter is REJECTED): vertical 9:16, art style, FULL character physical anchor (hair: exact color+length+style, skin tone, eye color, clothing: exact color name+garment+fit, height/build, position), exact environment (room type, wall color, floor material, furniture), camera framing+angle, lighting direction+quality+color temp, color palette (3-4 dominant hues), mood/atmosphere, props with position. ZERO vague sentences.",
-      "animationPrompt": "COMPLETE copy-ready English animation prompt (MIN 120 WORDS): exact subject movement path, facial expression evolution, body gestures, camera movement type+speed+direction, shot duration estimate, transition type, emotional arc. For each dialogue line: SPEAKER BLOCKING with explicit ⚠️ warning naming which character's mouth moves and confirming all others keep mouths fully closed.",
-      "voiceOverDarija": "speaker-labeled Moroccan Darija dialogue block — one line per speaker turn — e.g. Strawberry Mother: \\"...\\"\nStrawberry Father: \\"...\\"\nStrawberry Mother: \\"...\\"",
-      "soundEffectsPrompt": "English sound design brief: ambience, music genre+tempo, specific sfx moments, volume mix, diegetic sounds from visible actions"
+      "scene_number": 1,
+      "timestamp_start": "00:00.000",
+      "timestamp_end": "00:02.500",
+      "duration": 2.5,
+      "scene_type": "hook",
+      "mood": "mysterious",
+      "narrative_purpose": "hook - grab attention",
+      "title": "precise description of this visible beat",
+
+      "image_prompt": "SELF-CONTAINED forensic image prompt (MIN 150 WORDS): 9:16 vertical, art style, FULL character anchors, environment, framing, lighting, color palette, props, mood. Zero vague sentences.",
+
+      "animation_prompt": "COMPLETE motion prompt (MIN 120 WORDS): movement paths, expressions, camera movement, duration, transition, speaker blocking with ⚠️ warnings.",
+
+      "voiceover": {
+        "text": "Speaker-labeled dialogue lines in Darija",
+        "language": "darija",
+        "speaker": "CHAR_01",
+        "emotion": "excited",
+        "delivery_notes": "fast-paced, loud"
+      },
+
+      "sound_design": {
+        "music": "genre, tempo, mood, instruments",
+        "sfx": ["footsteps", "door slam"],
+        "ambient": "city traffic, distant voices",
+        "transition": "hard cut"
+      },
+
+      "camera": {
+        "angle": "close-up",
+        "movement": "slow zoom in",
+        "lens_style": "shallow depth of field"
+      },
+
+      "text_overlay": {
+        "text": "on-screen text if any",
+        "position": "center",
+        "font_style": "bold sans-serif",
+        "color": "#FFFFFF",
+        "animation": "fade in"
+      }
     }
   ]
 }
 
-The scenes array must contain as many objects as the video content requires. Do not cap it artificially.`,
+The scenes array must contain as many objects as the video content requires. Do NOT skip any scene. Do NOT cap it artificially.`,
               },
               ...frames,
             ],
           },
         ],
-        max_completion_tokens: 16000,
+        max_completion_tokens: 32000,
       }),
     }).finally(() => clearTimeout(timeoutId));
   };
@@ -711,48 +859,183 @@ async function normalizeVideoAnalysisResponse(
     throw new Error("AI video analysis returned an empty response.");
   }
 
+  type RawScene = {
+    title?: string;
+    scene_number?: number;
+    sceneNumber?: number;
+    scene_type?: string;
+    sceneType?: string;
+    timestamp_start?: string;
+    timestampStart?: string;
+    timestamp_end?: string;
+    timestampEnd?: string;
+    duration?: number;
+    mood?: string;
+    narrative_purpose?: string;
+    narrativePurpose?: string;
+    image_prompt?: string;
+    imagePrompt?: string;
+    animation_prompt?: string;
+    animationPrompt?: string;
+    voiceover?: VoiceoverData | string;
+    voiceOverDarija?: string;
+    voice_over_darija?: string;
+    sound_design?: SoundDesignData;
+    soundDesign?: SoundDesignData;
+    soundEffectsPrompt?: string;
+    sound_effects_prompt?: string;
+    camera?: CameraData;
+    text_overlay?: TextOverlayData;
+    textOverlay?: TextOverlayData;
+  };
+
+  type RawCharacter = {
+    id?: string;
+    description?: string;
+    first_appearance?: number;
+    firstAppearance?: number;
+    appearances?: number[];
+    clothing_log?: Array<{ scenes: number[]; outfit: string }>;
+    clothingLog?: Array<{ scenes: number[]; outfit: string }>;
+  };
+
   const parsed = (await parseOrRepairJsonObject(content, baseUrl, apiKey)) as {
     title?: string;
     summaryPrompt?: string;
-    scenes?: Array<Partial<GeneratedScene>>;
+    summary_prompt?: string;
+    detected_language?: string;
+    detectedLanguage?: string;
+    total_scenes?: number;
+    totalScenes?: number;
+    duration_seconds?: number;
+    durationSeconds?: number;
+    aspect_ratio?: string;
+    aspectRatio?: string;
+    overall_style?: string;
+    overallStyle?: string;
+    color_grading?: string;
+    colorGrading?: string;
+    mood_progression?: string;
+    moodProgression?: string;
+    content_category?: string;
+    contentCategory?: string;
+    viral_elements?: string[];
+    viralElements?: string[];
+    characters?: RawCharacter[];
+    scenes?: RawScene[];
   };
 
   if (!Array.isArray(parsed.scenes) || parsed.scenes.length < 1) {
     throw new Error("AI video analysis did not return any scenes.");
   }
 
+  const normalizedCharacters: CharacterData[] | null = parsed.characters
+    ? parsed.characters.map((c) => ({
+        id: c.id || "CHAR_UNKNOWN",
+        description: c.description || "",
+        firstAppearance: c.first_appearance ?? c.firstAppearance,
+        appearances: c.appearances,
+        clothingLog: c.clothing_log ?? c.clothingLog,
+      }))
+    : null;
+
+  const defaultSummary = `### Style\n* **Visual Texture:** AI analyzed the uploaded video frames and generated a direct recreation brief from the visible content.\n* **Lighting Quality:** Match the lighting visible in the source frames.\n* **Color Palette:** Match the colors visible in the source frames.\n* **Atmosphere:** Preserve the source video's mood.\n\n### Cinematography\n* **Camera:** Match the source framing and camera movement.\n* **Lens:** Match the source perspective.\n* **Lighting:** Match the source lighting direction and intensity.\n* **Mood:** Preserve the source visual emotion.`;
+
   return {
     title: truncateGeneratedText(parsed.title || `${input.niche.name}: analyzed reel prompt pack`, 120),
     summaryPrompt: truncateGeneratedText(
-      parsed.summaryPrompt ||
-        `### Style\n* **Visual Texture:** AI analyzed the uploaded video frames and generated a direct recreation brief from the visible content.\n* **Lighting Quality:** Match the lighting visible in the source frames.\n* **Color Palette:** Match the colors visible in the source frames.\n* **Atmosphere:** Preserve the source video's mood.\n\n### Cinematography\n* **Camera:** Match the source framing and camera movement.\n* **Lens:** Match the source perspective.\n* **Lighting:** Match the source lighting direction and intensity.\n* **Mood:** Preserve the source visual emotion.`,
+      parsed.summaryPrompt ?? parsed.summary_prompt ?? defaultSummary,
       5000,
     ),
+    detectedLanguage: parsed.detected_language ?? parsed.detectedLanguage ?? null,
+    totalScenes: parsed.total_scenes ?? parsed.totalScenes ?? parsed.scenes.length,
+    durationSeconds: parsed.duration_seconds ?? parsed.durationSeconds ?? null,
+    aspectRatio: parsed.aspect_ratio ?? parsed.aspectRatio ?? null,
+    overallStyle: parsed.overall_style ?? parsed.overallStyle ?? null,
+    colorGrading: parsed.color_grading ?? parsed.colorGrading ?? null,
+    moodProgression: parsed.mood_progression ?? parsed.moodProgression ?? null,
+    contentCategory: parsed.content_category ?? parsed.contentCategory ?? null,
+    viralElements: parsed.viral_elements ?? parsed.viralElements ?? null,
+    characters: normalizedCharacters,
     scenes: parsed.scenes.map((scene, index) => {
       const title = truncateGeneratedText(scene.title || (index === 0 ? "Hook from analyzed reel" : `Scene ${index + 1}`), 160);
       const frames = input.videoFrames ?? [];
 
+      // Normalize voiceover: can be an object or a string
+      const rawVoiceover = scene.voiceover;
+      let voiceoverObj: VoiceoverData | null = null;
+      let voiceOverDarijaStr: string;
+      if (rawVoiceover && typeof rawVoiceover === "object") {
+        voiceoverObj = {
+          text: rawVoiceover.text || "",
+          language: rawVoiceover.language,
+          speaker: rawVoiceover.speaker,
+          emotion: rawVoiceover.emotion,
+          deliveryNotes: rawVoiceover.deliveryNotes,
+        };
+        voiceOverDarijaStr = normalizeDialogueBlock(
+          rawVoiceover.text || scene.voiceOverDarija || scene.voice_over_darija,
+          "No clear dialogue heard in this scene.",
+        );
+      } else {
+        voiceOverDarijaStr = normalizeDialogueBlock(
+          scene.voiceOverDarija || scene.voice_over_darija || (typeof rawVoiceover === "string" ? rawVoiceover : undefined),
+          "No clear dialogue heard in this scene.",
+        );
+      }
+
+      // Normalize sound design: object or string fallback
+      const rawSoundDesign = scene.sound_design ?? scene.soundDesign;
+      const soundDesignObj: SoundDesignData | null = rawSoundDesign
+        ? {
+            music: rawSoundDesign.music,
+            sfx: rawSoundDesign.sfx,
+            ambient: rawSoundDesign.ambient,
+            transition: rawSoundDesign.transition,
+          }
+        : null;
+
+      const soundEffectsStr = rawSoundDesign
+        ? [
+            rawSoundDesign.music ? `Music: ${rawSoundDesign.music}` : null,
+            rawSoundDesign.sfx?.length ? `SFX: ${rawSoundDesign.sfx.join(", ")}` : null,
+            rawSoundDesign.ambient ? `Ambient: ${rawSoundDesign.ambient}` : null,
+            rawSoundDesign.transition ? `Transition: ${rawSoundDesign.transition}` : null,
+          ].filter(Boolean).join(". ") || "Minimal ambient sound."
+        : requireGeneratedText(
+            scene.soundEffectsPrompt || scene.sound_effects_prompt,
+            "sound prompt",
+            "Use background sound and music that match the audible mood of this moment.",
+          );
+
+      const sceneType = scene.scene_type ?? scene.sceneType ?? (index === 0 ? "hook" : "scene");
+
       return {
         sceneNumber: index + 1,
-        sceneType: index === 0 ? "hook" : "scene",
+        sceneType,
         title,
         imagePrompt: requireGeneratedText(
-          scene.imagePrompt,
+          scene.image_prompt ?? scene.imagePrompt,
           "image prompt",
-          `Vertical 9:16 image-generation prompt. Recreate this visible beat from the analyzed video: ${title}. Include the exact subject, character design, setting, composition, camera framing, lighting, color palette, props, action, and mood visible in the sampled frames.`,
+          `Vertical 9:16 image-generation prompt. Recreate this visible beat: ${title}.`,
         ),
         animationPrompt: requireGeneratedText(
-          scene.animationPrompt,
+          scene.animation_prompt ?? scene.animationPrompt,
           "animation prompt",
-          `Animate this beat with camera movement and character action that matches the uploaded video moment: ${title}. If there is dialogue, only the named speaker should move their mouth for each line while the other characters react silently; do not swap speaker roles.`,
+          `Animate this beat with camera movement and character action: ${title}.`,
         ),
-        voiceOverDarija: normalizeDialogueBlock(scene.voiceOverDarija, "No clear dialogue heard in this scene."),
-        soundEffectsPrompt: requireGeneratedText(
-          scene.soundEffectsPrompt,
-          "sound prompt",
-          "Use background sound and music that match the audible mood of this moment without inventing unrelated effects.",
-        ),
+        voiceOverDarija: voiceOverDarijaStr,
+        soundEffectsPrompt: soundEffectsStr,
         sceneFrameUrl: pickFrameForScene(frames, index, parsed.scenes.length),
+        timestampStart: scene.timestamp_start ?? scene.timestampStart ?? null,
+        timestampEnd: scene.timestamp_end ?? scene.timestampEnd ?? null,
+        duration: scene.duration ?? null,
+        mood: scene.mood ?? null,
+        narrativePurpose: scene.narrative_purpose ?? scene.narrativePurpose ?? null,
+        camera: scene.camera ?? null,
+        voiceover: voiceoverObj,
+        soundDesign: soundDesignObj,
+        textOverlay: scene.text_overlay ?? scene.textOverlay ?? null,
       };
     }),
   };
