@@ -14,7 +14,7 @@ const router = Router();
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 const providerSchema = z.object({
-  type: z.enum(["openrouter", "custom"]),
+  type: z.enum(["openrouter", "custom", "nvidia"]),
   name: z.string().min(1),
   baseUrl: z.string().url(),
   apiKey: z.string().min(1),
