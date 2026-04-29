@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useSignIn } from "@clerk/react";
+
 import {
   Users, Settings, Megaphone, ShieldCheck, User, Trash2,
   LogIn, Crown, ChevronDown, Plus, Edit2, Check, X,
@@ -85,7 +85,7 @@ function Badge({ role }: { role: string }) {
 function MembersTab() {
   const qc = useQueryClient();
   const { toast } = useToast();
-  const { signIn, setActive } = useSignIn();
+
   const [search, setSearch] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
@@ -133,19 +133,7 @@ function MembersTab() {
   });
 
   async function handleImpersonate(userId: string) {
-    try {
-      const r = await fetch(`/api/admin/users/${userId}/impersonate`, {
-        method: "POST", credentials: "include",
-      });
-      if (!r.ok) throw new Error("فشل إنشاء جلسة الانتحال");
-      const { token } = await r.json();
-      if (!signIn || !setActive) throw new Error("Clerk غير جاهز");
-      const result = await signIn.create({ strategy: "ticket" as any, ticket: token } as any);
-      await setActive({ session: result.createdSessionId! });
-      toast({ title: "تم الدخول كعضو" });
-    } catch (e: any) {
-      toast({ title: "خطأ", description: e.message, variant: "destructive" });
-    }
+    toast({ title: "غير متاح", description: "الانتحال غير متاح بدون Clerk", variant: "destructive" });
   }
 
   return (

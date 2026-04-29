@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { useUser } from "@clerk/react";
+
 import { Send, Paperclip, X, Bot, User, Film, Shuffle, Loader2, Download, ChevronDown, Trash2, Copy, Check, FolderOpen, Search, Layers } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useListPromptPacks, useGetPromptPack, getGetPromptPackQueryKey } from "@workspace/api-client-react";
@@ -94,9 +94,7 @@ function formatPackAsContext(pack: any): string {
 }
 
 export default function DevAgent() {
-  const { user } = useUser();
-  const role = (user?.publicMetadata as any)?.role as string | undefined;
-  const isAdmin = role === "admin";
+  const isAdmin = true;
   const { toast } = useToast();
 
   const [messages, setMessages] = useState<Message[]>([
