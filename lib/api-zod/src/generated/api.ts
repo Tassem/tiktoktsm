@@ -265,6 +265,9 @@ export const GetPromptPackResponse = zod
     contentCategory: zod.string().nullable().optional(),
     viralElements: zod.array(zod.string()).nullable().optional(),
     characters: zod.array(characterDataSchema).nullable().optional(),
+    qualityScore: zod.number().nullable().optional(),
+    validationIssues: zod.array(zod.string()).nullable().optional(),
+    retryCount: zod.number().nullable().optional(),
   })
   .and(
     zod.object({
@@ -327,6 +330,9 @@ export const UpdatePromptPackResponse = zod
     contentCategory: zod.string().nullable().optional(),
     viralElements: zod.array(zod.string()).nullable().optional(),
     characters: zod.array(characterDataSchema).nullable().optional(),
+    qualityScore: zod.number().nullable().optional(),
+    validationIssues: zod.array(zod.string()).nullable().optional(),
+    retryCount: zod.number().nullable().optional(),
   })
   .and(
     zod.object({

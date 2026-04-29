@@ -96,6 +96,9 @@ type GetPromptPackResponse = {
   contentCategory?: string | null;
   viralElements?: string[] | null;
   characters?: CharacterData[] | null;
+  qualityScore?: number | null;
+  validationIssues?: string[] | null;
+  retryCount?: number | null;
   scenes: GetPromptPackScene[];
 };
 
@@ -273,6 +276,24 @@ export default function PackDetail() {
             {typedPack.colorGrading && (
               <Badge variant="outline" className="text-xs text-amber-600">{typedPack.colorGrading}</Badge>
             )}
+            {typedPack.qualityScore != null && (
+              <Badge variant="outline" className={`text-xs ${typedPack.qualityScore >= 70 ? "text-green-600 border-green-300" : typedPack.qualityScore >= 50 ? "text-yellow-600 border-yellow-300" : "text-red-600 border-red-300"}`}>
+                Quality: {typedPack.qualityScore}/100
+              </Badge>
+            )}
+            {typedPack.retryCount != null && typedPack.retryCount > 0 && (
+              <Badge variant="outline" className="text-xs text-orange-500">Retries: {typedPack.retryCount}</Badge>
+            )}
+          </div>
+        )}
+
+        {/* ── Validation Issues ── */}
+        {typedPack.validationIssues && typedPack.validationIssues.length > 0 && typedPack.qualityScore != null && typedPack.qualityScore < 60 && (
+          <div className="mt-2 p-2 bg-red-50 dark:bg-red-950/30 rounded text-xs text-red-700 dark:text-red-400">
+            <p className="font-semibold mb-1">Quality Issues:</p>
+            {typedPack.validationIssues.map((issue, i) => (
+              <p key={i} className="ml-2">• {issue}</p>
+            ))}
           </div>
         )}
 

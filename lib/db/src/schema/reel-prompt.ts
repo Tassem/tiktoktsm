@@ -45,6 +45,9 @@ export const reelAnalysesTable = pgTable("reel_analyses", {
   contentCategory: text("content_category"),
   viralElements: jsonb("viral_elements"),
   characters: jsonb("characters"),
+  qualityScore: integer("quality_score"),
+  validationIssues: jsonb("validation_issues"),
+  retryCount: integer("retry_count"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

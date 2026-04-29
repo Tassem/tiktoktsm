@@ -46,6 +46,20 @@ type CharacterData = {
   clothingLog?: Array<{ scenes: number[]; outfit: string }>;
 };
 
+type TranscriptionSegment = {
+  start: number;
+  end: number;
+  text: string;
+  language: string;
+};
+
+type ValidationResult = {
+  passed: boolean;
+  issues: string[];
+  severity: "critical" | "warning" | "ok";
+  qualityScore: number;
+};
+
 type GeneratedScene = {
   sceneNumber: number;
   sceneType: string;
@@ -80,6 +94,9 @@ type GeneratedPromptPack = {
   contentCategory?: string | null;
   viralElements?: string[] | null;
   characters?: CharacterData[] | null;
+  qualityScore?: number | null;
+  validationIssues?: string[] | null;
+  retryCount?: number | null;
 };
 
 const darijaLines = [
@@ -398,21 +415,28 @@ export async function buildAIVideoPromptPack(input: {
   const { baseUrl, apiKey, modelId: defaultModel } = await resolveAiConfig("video-analysis");
 
   // Run scene detection and audio transcription in parallel when video data is available
-  const [sceneDetection, audioTranscript] = await Promise.all([
+  const [sceneDetection, transcriptionResult] = await Promise.all([
     input.videoDataUrl
       ? import("./scene-detect.js").then((m) => m.detectScenesFromVideo(input.videoDataUrl!)).catch(() => null)
       : Promise.resolve(null),
     input.videoDataUrl
-      ? transcribeVideoAudio(input.videoDataUrl, baseUrl, apiKey).catch(() => null)
-      : Promise.resolve(null),
+      ? transcribeVideoAudioWithSegments(input.videoDataUrl, baseUrl, apiKey).catch(() => ({ text: null, segments: [] }))
+      : Promise.resolve({ text: null, segments: [] }),
   ]);
+
+  const audioTranscript = transcriptionResult.text;
+  const audioSegments = transcriptionResult.segments;
+
+  // Dynamic frame cap based on scene count
+  const sceneCount = sceneDetection?.sceneTimestamps.length ?? 0;
+  const dynamicFrameCap = sceneCount <= 20 ? 40 : sceneCount <= 35 ? 60 : 80;
 
   // Smart frame selection: prioritize scene-change frames, fill gaps with interval frames
   const frameInputs = buildSmartFrameInputs(
     input.videoFrames,
     sceneDetection?.sceneTimestamps ?? [],
     sceneDetection?.durationSeconds ?? 0,
-    40,
+    dynamicFrameCap,
     "low",
   );
 
@@ -420,12 +444,21 @@ export async function buildAIVideoPromptPack(input: {
     throw new Error("No video frames were provided for analysis.");
   }
 
+  const detectedSceneCount = sceneDetection?.totalScenes ?? 0;
+  const videoDuration = sceneDetection?.durationSeconds ?? 0;
+
+  // Build rich scene change info with confidence levels
   const sceneChangeInfo = sceneDetection
-    ? `\n- Scene change detection found ${sceneDetection.sceneTimestamps.length} visual cuts at timestamps: [${sceneDetection.sceneTimestamps.map((t) => t.toFixed(1) + "s").join(", ")}]. Frames marked with [SCENE-CHANGE] are at these cut points — they are critical for identifying scene boundaries.`
+    ? `\n- Scene detection (adaptive threshold=${sceneDetection.detectionThresholdUsed}) found ${sceneDetection.sceneTimestamps.length} visual cuts (${detectedSceneCount} total scenes, avg ${sceneDetection.averageSceneDuration}s/scene): [${sceneDetection.sceneChanges.map((c) => `${c.timestamp.toFixed(1)}s (${c.type}, confidence=${c.confidence.toFixed(2)})`).join(", ")}]. Frames marked with [SCENE-CHANGE] are at these cut points.`
     : "";
   const frameTimingInfo = frameInputs.timestamps.length > 0
     ? `\n- Frame timestamps: ${frameInputs.timestamps.map((t, i) => `Frame ${i + 1}: ${t.toFixed(1)}s${frameInputs.sceneChangeFlags[i] ? " [SCENE-CHANGE]" : ""}`).join(", ")}`
     : "";
+
+  // Build structured audio transcription with timestamps
+  const audioTranscriptInfo = audioSegments.length > 0
+    ? buildStructuredTranscription(audioSegments, sceneDetection?.sceneTimestamps ?? [])
+    : audioTranscript || "No usable speech transcript was extracted. Describe background sound from visual context only and do not claim exact spoken lines.";
   const sendAnalysisRequest = (frames: ReturnType<typeof buildFrameInputs>, retryNote = "") => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 8 * 60 * 1000); // 8-min hard timeout for deeper analysis
@@ -447,11 +480,43 @@ export async function buildAIVideoPromptPack(input: {
             content: input.systemPromptOverride ??
               `You are an elite video-to-prompt forensic engineer. Your output is fed directly into AI video generators (Kling, Sora, Runway, Pika). Every prompt you write must be copy-ready with zero ambiguity: a video generator reading your prompt must produce the exact same scene without seeing the original video.
 
+══════════════════════════════════════════
+ABSOLUTE RULES — NEVER VIOLATE
+══════════════════════════════════════════
+
+RULE 1 — COMPLETENESS:
+You will be given frames from a video with scene-change timestamps. You MUST create a scene entry for EVERY detected scene change timestamp. Missing even ONE timestamp = FAILURE.
+
+RULE 2 — MINIMUM SCENE COUNT:
+${detectedSceneCount > 0 ? `Based on scene detection, there are approximately ${detectedSceneCount} scenes in this ${videoDuration.toFixed(1)}s video. Your output MUST contain at least ${detectedSceneCount} scene objects. If you detect additional scenes not in the provided timestamps, ADD THEM. Never return fewer than ${detectedSceneCount} scenes.` : `Analyze the frames carefully to detect all scenes. Never merge distinct shots into one scene.`}
+
+RULE 3 — PROMPT LENGTH:
+Every image_prompt MUST be minimum 80 words. Short prompts = FAILURE. Every prompt must include: environment + character + lighting + camera + mood.
+
+RULE 4 — NO SKIPPING:
+Even if two consecutive scenes look similar, describe each one separately and completely. Never write "same as previous scene" or "similar to scene X". Every scene is standalone and complete.
+
+RULE 5 — TIMESTAMP ACCURACY:
+Timestamps must be sequential and non-overlapping. timestamp_end of scene N must equal or be very close to timestamp_start of scene N+1. No gaps > 1 second between consecutive scenes.
+
+RULE 6 — CHARACTER CONSISTENCY:
+Once you describe a character's appearance, that description is LOCKED. The exact same physical description must appear in every scene that character appears in. Never change hair color, skin tone, or clothing mid-video unless there is a visible costume change in the frames.
+
+══════════════════════════════════════════
+
 Your analysis follows 4 PHASES in strict order:
 1. SCENE DETECTION — identify every distinct scene/shot
 2. DEEP ANALYSIS — forensic-level detail per scene
 3. CHARACTER IDENTITY LOCK — build a character registry with consistent descriptions
 4. GLOBAL VIDEO METADATA — overall video properties
+
+Before writing your JSON, follow this checklist:
+□ Count the scene-change timestamps provided
+□ Your scenes[] array must have at least that many entries
+□ Every scene has: image_prompt (80+ words), animation_prompt, voiceover, sound_design, timestamp_start, timestamp_end
+□ All timestamps are sequential
+□ Character descriptions are consistent
+□ Total scenes matches your totalScenes field
 
 Return strict JSON only.`,
           },
@@ -591,7 +656,7 @@ WHAT TO IGNORE
 ADDITIONAL CONTEXT
 ═══════════════════
 - User notes: ${input.reelNotes}
-- Audio transcript: ${audioTranscript || "No usable speech transcript was extracted. Describe background sound from visual context only and do not claim exact spoken lines."}${sceneChangeInfo}${frameTimingInfo}
+- Audio transcript: ${audioTranscriptInfo}${sceneChangeInfo}${frameTimingInfo}
 ${retryNote}
 
 ═══════════════════
@@ -696,7 +761,12 @@ The scenes array must contain as many objects as the video content requires. Do 
       );
 
       if (response.ok) {
-        return normalizeVideoAnalysisResponse(await response.json(), baseUrl, apiKey, input);
+        const result = await normalizeVideoAnalysisResponse(await response.json(), baseUrl, apiKey, input);
+        const validation = validateAnalysisOutput(result, detectedSceneCount, videoDuration);
+        result.qualityScore = validation.qualityScore;
+        result.validationIssues = validation.issues.length > 0 ? validation.issues : null;
+        result.retryCount = 1;
+        return result;
       }
 
       const retryErrorText = await response.text();
@@ -706,7 +776,53 @@ The scenes array must contain as many objects as the video content requires. Do 
     throw new Error(`AI video analysis failed: ${errorText.slice(0, 500)}`);
   }
 
-  return normalizeVideoAnalysisResponse(await response.json(), baseUrl, apiKey, input);
+  let result = await normalizeVideoAnalysisResponse(await response.json(), baseUrl, apiKey, input);
+  let validation = validateAnalysisOutput(result, detectedSceneCount, videoDuration);
+  let retryCount = 0;
+
+  // Auto-retry on critical validation failure (up to 2 retries)
+  if (validation.severity === "critical" && detectedSceneCount > 0) {
+    // Attempt 2: Retry with explicit scene count instruction
+    retryCount++;
+    const retryResponse = await sendAnalysisRequest(
+      frameInputs.frames,
+      `\n\n⚠️ CRITICAL RETRY — Your previous response had ${result.scenes.length} scenes but the video has approximately ${detectedSceneCount} scenes. You MUST return at least ${detectedSceneCount} scene objects. Focus on scene detection accuracy and image prompts.`,
+    );
+
+    if (retryResponse.ok) {
+      const retryResult = await normalizeVideoAnalysisResponse(await retryResponse.json(), baseUrl, apiKey, input);
+      const retryValidation = validateAnalysisOutput(retryResult, detectedSceneCount, videoDuration);
+
+      if (retryValidation.qualityScore > validation.qualityScore) {
+        result = retryResult;
+        validation = retryValidation;
+      }
+    }
+
+    // Attempt 3 if still critical: simplified prompt
+    if (validation.severity === "critical") {
+      retryCount++;
+      const simplifiedResponse = await sendAnalysisRequest(
+        frameInputs.frames,
+        `\n\n⚠️ FINAL RETRY — Previous attempts failed quality checks. SIMPLIFIED TASK: Return ${detectedSceneCount} scenes minimum. Each scene MUST have image_prompt (80+ words), animation_prompt, scene_type, timestamp_start, timestamp_end. Skip character registry and sound design if needed — scene coverage is the priority.`,
+      );
+
+      if (simplifiedResponse.ok) {
+        const simplifiedResult = await normalizeVideoAnalysisResponse(await simplifiedResponse.json(), baseUrl, apiKey, input);
+        const simplifiedValidation = validateAnalysisOutput(simplifiedResult, detectedSceneCount, videoDuration);
+
+        if (simplifiedValidation.qualityScore > validation.qualityScore) {
+          result = simplifiedResult;
+          validation = simplifiedValidation;
+        }
+      }
+    }
+  }
+
+  result.qualityScore = validation.qualityScore;
+  result.validationIssues = validation.issues.length > 0 ? validation.issues : null;
+  result.retryCount = retryCount > 0 ? retryCount : null;
+  return result;
 }
 
 export async function buildAIUrlOnlyPromptPack(input: {
@@ -1027,7 +1143,7 @@ async function normalizeVideoAnalysisResponse(
         ),
         voiceOverDarija: voiceOverDarijaStr,
         soundEffectsPrompt: soundEffectsStr,
-        sceneFrameUrl: pickFrameForScene(frames, index, parsed.scenes.length),
+        sceneFrameUrl: pickFrameForScene(frames, index, parsed.scenes!.length),
         timestampStart: scene.timestamp_start ?? scene.timestampStart ?? null,
         timestampEnd: scene.timestamp_end ?? scene.timestampEnd ?? null,
         duration: scene.duration ?? null,
@@ -1301,7 +1417,15 @@ function truncateGeneratedText(value: string, maxLength: number) {
   return `${value.slice(0, maxLength - 1).trim()}…`;
 }
 
-async function transcribeVideoAudio(videoDataUrl: string, baseUrl: string, apiKey: string) {
+/**
+ * Transcribe video audio with segment-level timestamps.
+ * Falls back to raw text transcription if verbose_json is not supported.
+ */
+async function transcribeVideoAudioWithSegments(
+  videoDataUrl: string,
+  baseUrl: string,
+  apiKey: string,
+): Promise<{ text: string | null; segments: TranscriptionSegment[] }> {
   const parsed = parseDataUrl(videoDataUrl);
   const workspace = path.join(tmpdir(), `reel-audio-${randomUUID()}`);
   const inputPath = path.join(workspace, `source.${extensionForMime(parsed.mimeType)}`);
@@ -1316,29 +1440,63 @@ async function transcribeVideoAudio(videoDataUrl: string, baseUrl: string, apiKe
         timeout: 120000,
       });
     } catch {
-      return "No usable audio track was detected in the uploaded video.";
+      return { text: "No usable audio track was detected in the uploaded video.", segments: [] };
     }
 
     const audioBuffer = await readFile(audioPath);
     if (audioBuffer.byteLength < 1024) {
-      return "No usable audio track was detected in the uploaded video.";
+      return { text: "No usable audio track was detected in the uploaded video.", segments: [] };
     }
 
+    // Try verbose_json first for segment timestamps
     const formData = new FormData();
     formData.append("model", "gpt-4o-mini-transcribe");
     formData.append("file", new Blob([audioBuffer], { type: "audio/wav" }), "audio.wav");
-    formData.append("response_format", "json");
+    formData.append("response_format", "verbose_json");
+    formData.append("timestamp_granularities[]", "segment");
 
     const transcribeController = new AbortController();
-    const transcribeTimeout = setTimeout(() => transcribeController.abort(), 60 * 1000); // 60s max
-    const response = await fetch(`${baseUrl.replace(/\/$/, "")}/audio/transcriptions`, {
+    const transcribeTimeout = setTimeout(() => transcribeController.abort(), 60 * 1000);
+    let response = await fetch(`${baseUrl.replace(/\/$/, "")}/audio/transcriptions`, {
       method: "POST",
       signal: transcribeController.signal,
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
+      headers: { Authorization: `Bearer ${apiKey}` },
       body: formData,
     }).finally(() => clearTimeout(transcribeTimeout));
+
+    if (response.ok) {
+      const payload = (await response.json()) as {
+        text?: string;
+        segments?: Array<{ start: number; end: number; text: string; avg_logprob?: number }>;
+      };
+
+      if (payload.segments && payload.segments.length > 0) {
+        const segments: TranscriptionSegment[] = payload.segments.map((seg) => ({
+          start: seg.start,
+          end: seg.end,
+          text: seg.text.trim(),
+          language: detectSegmentLanguage(seg.text),
+        }));
+        return { text: payload.text?.trim() || null, segments };
+      }
+
+      return { text: payload.text?.trim() || null, segments: [] };
+    }
+
+    // Fallback: try plain json format
+    const fallbackFormData = new FormData();
+    fallbackFormData.append("model", "gpt-4o-mini-transcribe");
+    fallbackFormData.append("file", new Blob([audioBuffer], { type: "audio/wav" }), "audio.wav");
+    fallbackFormData.append("response_format", "json");
+
+    const fallbackController = new AbortController();
+    const fallbackTimeout = setTimeout(() => fallbackController.abort(), 60 * 1000);
+    response = await fetch(`${baseUrl.replace(/\/$/, "")}/audio/transcriptions`, {
+      method: "POST",
+      signal: fallbackController.signal,
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: fallbackFormData,
+    }).finally(() => clearTimeout(fallbackTimeout));
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -1346,10 +1504,149 @@ async function transcribeVideoAudio(videoDataUrl: string, baseUrl: string, apiKe
     }
 
     const payload = (await response.json()) as { text?: string };
-    return payload.text?.trim() || "The audio track was present, but no clear speech was transcribed.";
+    return {
+      text: payload.text?.trim() || "The audio track was present, but no clear speech was transcribed.",
+      segments: [],
+    };
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
+}
+
+const DARIJA_MARKERS = new Set([
+  "ghadi", "walo", "bzzaf", "dyal", "machi", "rah", "hna", "fhad",
+  "khas", "katban", "bghiti", "chouf", "lmochkil", "tbedel", "fikra",
+  "kayn", "hadchi", "mnin", "chhal", "wakha", "bzaf", "daba", "bach",
+  "fach", "wach", "dial", "lhaja", "kolchi", "chkon", "kifach", "fin",
+]);
+
+function detectSegmentLanguage(text: string): string {
+  const lower = text.toLowerCase();
+  const words = lower.split(/\s+/);
+
+  const hasDarija = words.some((w) => DARIJA_MARKERS.has(w));
+  const hasArabicScript = /[\u0600-\u06FF]/.test(text);
+  const hasFrench = /\b(je|tu|il|elle|nous|vous|ils|les|des|pour|avec|dans|sur|que|qui|est|sont|mais|ou|et|donc|car|ni|puis|comme|très|bien|bon|jour|merci)\b/i.test(text);
+
+  if (hasDarija && hasFrench) return "mixed_darija_french";
+  if (hasDarija) return "darija";
+  if (hasArabicScript && hasFrench) return "mixed_arabic_french";
+  if (hasArabicScript) return "arabic";
+  if (hasFrench) return "french";
+  return "other";
+}
+
+function buildStructuredTranscription(segments: TranscriptionSegment[], sceneTimestamps: number[]): string {
+  if (segments.length === 0) return "No usable speech transcript was extracted.";
+
+  const lines: string[] = ["=== AUDIO TRANSCRIPTION (with timestamps) ==="];
+
+  // Find gaps between segments (potential silence/music)
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+
+    // Check for silence gap before this segment
+    const prevEnd = i > 0 ? segments[i - 1].end : 0;
+    if (seg.start - prevEnd > 1.5) {
+      lines.push(`[${formatTimestamp(prevEnd)} → ${formatTimestamp(seg.start)}] [SILENCE/MUSIC]`);
+    }
+
+    const langTag = seg.language.toUpperCase();
+    lines.push(`[${formatTimestamp(seg.start)} → ${formatTimestamp(seg.end)}] [${langTag}] ${seg.text}`);
+  }
+
+  lines.push("===");
+  return lines.join("\n");
+}
+
+function formatTimestamp(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${String(mins).padStart(2, "0")}:${secs.toFixed(1).padStart(4, "0")}`;
+}
+
+function validateAnalysisOutput(
+  result: GeneratedPromptPack,
+  expectedMinScenes: number,
+  videoDuration: number,
+): ValidationResult {
+  const issues: string[] = [];
+
+  // Critical checks
+  if (!result.scenes || result.scenes.length === 0) {
+    issues.push("CRITICAL: No scenes returned");
+  } else if (expectedMinScenes > 0 && result.scenes.length < expectedMinScenes * 0.5) {
+    issues.push(`CRITICAL: Only ${result.scenes.length} scenes returned, expected ~${expectedMinScenes}`);
+  }
+
+  // Warning checks per scene
+  if (result.scenes) {
+    for (let i = 0; i < result.scenes.length; i++) {
+      const scene = result.scenes[i];
+      if (!scene.imagePrompt || scene.imagePrompt.split(/\s+/).length < 30) {
+        issues.push(`WARNING: Scene ${i + 1} has weak image prompt (${scene.imagePrompt?.split(/\s+/).length ?? 0} words)`);
+      }
+      if (!scene.timestampStart) {
+        issues.push(`WARNING: Scene ${i + 1} missing timestamp`);
+      }
+    }
+
+    // Timestamp continuity
+    for (let i = 1; i < result.scenes.length; i++) {
+      const prevEnd = parseTimestampToSeconds(result.scenes[i - 1].timestampEnd);
+      const currStart = parseTimestampToSeconds(result.scenes[i].timestampStart);
+      if (prevEnd !== null && currStart !== null && currStart - prevEnd > 3.0) {
+        issues.push(`WARNING: Large gap between scene ${i} and ${i + 1}: ${(currStart - prevEnd).toFixed(1)}s`);
+      }
+    }
+  }
+
+  // Calculate quality score
+  const qualityScore = calculateQualityScore(result);
+  const hasCritical = issues.some((i) => i.startsWith("CRITICAL"));
+
+  return {
+    passed: !hasCritical,
+    issues,
+    severity: hasCritical ? "critical" : issues.length > 0 ? "warning" : "ok",
+    qualityScore,
+  };
+}
+
+function calculateQualityScore(result: GeneratedPromptPack): number {
+  let score = 0;
+
+  // Scene completeness (40 points)
+  score += Math.min(40, (result.scenes?.length ?? 0) * 2);
+
+  // Prompt richness (30 points)
+  if (result.scenes && result.scenes.length > 0) {
+    const avgPromptWords = result.scenes.reduce(
+      (sum, s) => sum + (s.imagePrompt?.split(/\s+/).length ?? 0), 0,
+    ) / result.scenes.length;
+    score += Math.min(30, Math.floor(avgPromptWords / 3));
+  }
+
+  // Metadata completeness (20 points)
+  if (result.characters && result.characters.length > 0) score += 10;
+  if (result.viralElements && result.viralElements.length > 0) score += 5;
+  if (result.moodProgression) score += 5;
+
+  // Timestamp accuracy (10 points)
+  if (result.scenes && result.scenes.length > 0) {
+    const hasAllTimestamps = result.scenes.every((s) => s.timestampStart);
+    if (hasAllTimestamps) score += 10;
+  }
+
+  return Math.min(100, score);
+}
+
+function parseTimestampToSeconds(ts: string | null | undefined): number | null {
+  if (!ts) return null;
+  const match = /^(\d+):(\d+(?:\.\d+)?)$/.exec(ts);
+  if (match) return parseInt(match[1]) * 60 + parseFloat(match[2]);
+  const num = parseFloat(ts);
+  return Number.isFinite(num) ? num : null;
 }
 
 function parseDataUrl(dataUrl: string) {
