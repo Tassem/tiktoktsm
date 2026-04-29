@@ -966,15 +966,16 @@ async function normalizeVideoAnalysisResponse(
       let voiceoverObj: VoiceoverData | null = null;
       let voiceOverDarijaStr: string;
       if (rawVoiceover && typeof rawVoiceover === "object") {
+        const rv = rawVoiceover as Record<string, unknown>;
         voiceoverObj = {
-          text: rawVoiceover.text || "",
-          language: rawVoiceover.language,
-          speaker: rawVoiceover.speaker,
-          emotion: rawVoiceover.emotion,
-          deliveryNotes: rawVoiceover.deliveryNotes,
+          text: (rv.text as string) || "",
+          language: (rv.language as string | undefined),
+          speaker: (rv.speaker as string | undefined),
+          emotion: (rv.emotion as string | undefined),
+          deliveryNotes: (rv.deliveryNotes ?? rv.delivery_notes) as string | undefined,
         };
         voiceOverDarijaStr = normalizeDialogueBlock(
-          rawVoiceover.text || scene.voiceOverDarija || scene.voice_over_darija,
+          (rv.text as string) || scene.voiceOverDarija || scene.voice_over_darija,
           "No clear dialogue heard in this scene.",
         );
       } else {
@@ -1032,10 +1033,27 @@ async function normalizeVideoAnalysisResponse(
         duration: scene.duration ?? null,
         mood: scene.mood ?? null,
         narrativePurpose: scene.narrative_purpose ?? scene.narrativePurpose ?? null,
-        camera: scene.camera ?? null,
+        camera: scene.camera
+          ? {
+              angle: scene.camera.angle,
+              movement: scene.camera.movement,
+              lensStyle: (scene.camera.lensStyle ?? (scene.camera as Record<string, unknown>).lens_style) as string | undefined,
+            }
+          : null,
         voiceover: voiceoverObj,
         soundDesign: soundDesignObj,
-        textOverlay: scene.text_overlay ?? scene.textOverlay ?? null,
+        textOverlay: (() => {
+          const raw = scene.text_overlay ?? scene.textOverlay;
+          if (!raw) return null;
+          const r = raw as Record<string, unknown>;
+          return {
+            text: r.text as string | undefined,
+            position: r.position as string | undefined,
+            fontStyle: (r.fontStyle ?? r.font_style) as string | undefined,
+            color: r.color as string | undefined,
+            animation: r.animation as string | undefined,
+          };
+        })(),
       };
     }),
   };
