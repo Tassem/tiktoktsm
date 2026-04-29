@@ -760,7 +760,7 @@ The scenes array must contain as many objects as the video content requires. Do 
   if (!response.ok) {
     const errorText = await response.text();
     if (isImageProcessingServerError(errorText) && input.videoFrames.length > 8) {
-      const retryFrames = buildFrameInputs(input.videoFrames, 12, "low");
+      const retryFrames = buildFrameInputs(input.videoFrames, Math.min(12, providerImageLimit), "low");
       response = await sendAnalysisRequest(
         retryFrames,
         "\n- This is a retry with fewer sampled frames because the first image processing attempt failed internally. Use these fewer frames plus the transcript to preserve the same beginning-to-end story flow as much as possible.",
