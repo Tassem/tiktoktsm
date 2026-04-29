@@ -42,7 +42,7 @@ async function detectSceneChangesRaw(
       "ffmpeg",
       [
         "-i", videoPath,
-        "-vf", `select='gt(scene,${threshold})',metadata=print:file=-`,
+        "-vf", `select='gt(scene,${threshold})',metadata=print`,
         "-vsync", "vfr",
         "-f", "null",
         "-",
