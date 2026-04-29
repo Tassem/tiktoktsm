@@ -1559,7 +1559,7 @@ const DARIJA_MARKERS = new Set([
   "zid", "ziid", "3tini", "golha", "bghina",
 ]);
 
-const FRENCH_MARKERS = /\b(je|tu|il|elle|nous|vous|ils|elles|les|des|pour|avec|dans|sur|que|qui|est|sont|mais|ou|et|donc|car|ni|puis|comme|très|bien|bon|jour|merci|oui|non|pas|plus|aussi|encore|ici|maintenant|toujours|jamais|rien|tout|peu|beaucoup|entre|chez|sans|vers|après|avant|pendant|depuis|parce|quand|comment|pourquoi|combien|cette|cette|ces|mon|ton|son|notre|votre|leur|faire|avoir|être|aller|venir|voir|savoir|pouvoir|vouloir|devoir|falloir|dire|donner|prendre|mettre|trouver|passer|regarder|aimer|croire|demander|rester|répondre|entendre|penser|arriver|connaître|devenir|sentir|attendre|vivre|chercher|sortir|comprendre|porter|perdre|commencer)\b/i;
+const FRENCH_MARKERS = /\b(?:je|tu|il|elle|nous|vous|ils|elles|les|des|pour|avec|dans|sur|que|qui|est|sont|mais|ou|et|donc|car|ni|puis|comme|très|bien|bon|jour|merci|oui|non|pas|plus|aussi|encore|ici|maintenant|toujours|jamais|rien|tout|peu|beaucoup|entre|chez|sans|vers|après|avant|pendant|depuis|parce|quand|comment|pourquoi|combien|cette|ces|mon|ton|son|notre|votre|leur|faire|avoir|être|aller|venir|voir|savoir|pouvoir|vouloir|devoir|falloir|dire|donner|prendre|mettre|trouver|passer|regarder|aimer|croire|demander|rester|répondre|entendre|penser|arriver|connaître|devenir|sentir|attendre|vivre|chercher|sortir|comprendre|porter|perdre|commencer)\b/gi;
 
 function detectSegmentLanguage(text: string): string {
   const lower = text.toLowerCase();
