@@ -8,7 +8,7 @@ import { eq, and } from "drizzle-orm";
 import { logger } from "./logger";
 
 interface ProviderSeed {
-  type: "openrouter" | "custom";
+  type: "openrouter" | "custom" | "nvidia";
   name: string;
   baseUrl: string;
   apiKey: string;

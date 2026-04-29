@@ -455,6 +455,8 @@ function ProviderCard({ provider, onRefresh }: { provider: Provider; onRefresh: 
 
   const typeColor = provider.type === "openrouter"
     ? "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300"
+    : provider.type === "nvidia"
+    ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300"
     : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300";
 
   function startEditInfo() {
@@ -526,7 +528,7 @@ function ProviderCard({ provider, onRefresh }: { provider: Provider; onRefresh: 
             <div className="flex items-start justify-between gap-2">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${typeColor}`}>
-                  {provider.type === "openrouter" ? "🌐 OpenRouter" : "🔧 Custom AI"}
+                  {provider.type === "openrouter" ? "🌐 OpenRouter" : provider.type === "nvidia" ? "🖥️ NVIDIA NIM" : "🔧 Custom AI"}
                 </span>
                 <span className="font-semibold text-sm">{provider.name}</span>
                 <Badge variant="outline" className="text-xs">{provider.models.length} موديل</Badge>
@@ -849,7 +851,7 @@ function ServiceAssignmentsCard({
                       <SelectItem key={m.id} value={m.id.toString()}>
                         <span className="flex items-center gap-2">
                           <span className="text-xs text-muted-foreground">
-                            {m.providerType === "openrouter" ? "🌐" : "🔧"} {m.providerName}
+                            {m.providerType === "openrouter" ? "🌐" : m.providerType === "nvidia" ? "🖥️" : "🔧"} {m.providerName}
                           </span>
                           <span>{m.label}</span>
                         </span>
